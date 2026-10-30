@@ -88,7 +88,8 @@ object Logbook {
     fun export(context: Context): File {
         // The external dir is what a FileProvider can expose; the internal one is the
         // fallback for a device with no external storage.
-        val dir = context.getExternalFilesDir(null) ?: context.filesDir
+        val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
+        val dir = File(baseDir, "reports").apply { mkdirs() }
         val file = File(dir, "diagnostic-${fileStamp.format(Date())}.txt")
         file.writeText(report(context))
         return file

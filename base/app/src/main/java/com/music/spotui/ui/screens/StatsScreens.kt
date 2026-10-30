@@ -25,9 +25,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.QueueMusic
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.QueueMusic
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -195,8 +195,9 @@ internal fun WeeklyMinutesChart(modifier: Modifier = Modifier) {
     val w = weeks ?: return
     if (w.all { it.minutes == 0L }) return
     val max = w.maxOf { it.minutes }.coerceAtLeast(1)
-    val pattern = android.text.format.DateFormat.getBestDateTimePattern(java.util.Locale.getDefault(), "dMMM")
-    val format = remember(pattern) { java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault()) }
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "dMMM")
+    val format = remember(pattern, locale) { java.text.SimpleDateFormat(pattern, locale) }
     Column(modifier.padding(16.dp, 8.dp)) {
         Text(stringResource(R.string.stats_weekly_minutes), color = AppText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Text(stringResource(R.string.stats_this_week, w.last().minutes), color = StatsSubtle, fontSize = 13.sp,
@@ -331,7 +332,7 @@ private fun FriendRow(f: FriendActivity, now: Long, navController: NavController
                     color = AppText, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
                 val where = f.contextName ?: track.album?.name
                 if (!where.isNullOrBlank()) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                    Icon(Icons.Outlined.QueueMusic, contentDescription = null, tint = StatsSubtle, modifier = Modifier.size(14.dp))
+                    Icon(Icons.AutoMirrored.Outlined.QueueMusic, contentDescription = null, tint = StatsSubtle, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(where, color = StatsSubtle, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }

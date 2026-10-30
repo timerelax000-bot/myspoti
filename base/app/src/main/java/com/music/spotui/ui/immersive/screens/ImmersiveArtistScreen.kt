@@ -301,9 +301,10 @@ private fun ArtistOverviewContent(
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.verified_artist), style = Immersive.Subhead.copy(color = Immersive.Text, fontWeight = FontWeight.SemiBold))
                     }
+                    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
                     overview.monthlyListeners?.let {
                         val compact = android.icu.text.CompactDecimalFormat
-                            .getInstance(java.util.Locale.getDefault(), android.icu.text.CompactDecimalFormat.CompactStyle.SHORT)
+                            .getInstance(locale, android.icu.text.CompactDecimalFormat.CompactStyle.SHORT)
                             .format(it)
                         Text(
                             text = stringResource(R.string.monthly_listeners_text, compact),

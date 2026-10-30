@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- Share-as-image cards (ShareCard.kt). -->
+    <!-- Share-as-image cards (ShareCard.kt) and Spotify codes (SpotifyCodeSheet.kt). -->
     <cache-path name="shared" path="shared/" />
-    <!-- Diagnostic reports (Logbook.export writes to getExternalFilesDir). -->
-    <external-files-path name="diagnostics" path="." />
+    <!-- Diagnostic reports (Logbook.export writes to dedicated reports/ subfolder). -->
+    <external-files-path name="diagnostics" path="reports/" />
+    <files-path name="internal_diagnostics" path="reports/" />
 </paths>

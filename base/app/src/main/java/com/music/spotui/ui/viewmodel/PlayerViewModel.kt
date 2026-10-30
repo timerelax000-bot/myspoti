@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class PlayerViewModel constructor(private val currentSongState: CurrentSongState = Graph.currentSongState, private val repository: AppRepository = Graph.repository) : ViewModel(){
@@ -150,14 +151,14 @@ class PlayerViewModel constructor(private val currentSongState: CurrentSongState
     private fun fetchSongs() = viewModelScope.launch(Dispatchers.IO) {
 
         repository.provideSongs().collect { songs ->
-            _songs.value = songs as Response<List<SongsModel>>
+            _songs.value = songs
 
         }
     }
     fun formatDuration(durationMillis: Long): String {
         val minutes = TimeUnit.MILLISECONDS.toMinutes(durationMillis)
         val seconds = TimeUnit.MILLISECONDS.toSeconds(durationMillis) - TimeUnit.MINUTES.toSeconds(minutes)
-        return String.format("%01d:%02d", minutes, seconds)
+        return String.format(Locale.US, "%01d:%02d", minutes, seconds)
     }
     fun updateSongState(coverUri: String, title: String, singer: String, playingState: Boolean, songId : Int, songIndex : Int = 0, album : String = "") {
         currentSongState.updateSongState(coverUri, title, singer, playingState, songId, songIndex, album)

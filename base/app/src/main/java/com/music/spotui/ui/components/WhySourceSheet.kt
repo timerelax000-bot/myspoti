@@ -88,6 +88,7 @@ private fun Line(text: String, muted: Boolean = false) = Text(text, color = if (
     modifier = Modifier.padding(horizontal = 20.dp, vertical = 3.dp))
 
 /** What the player's decoder reported ("audio/flac · 44.1 kHz · 2 ch"), or null: its input, not proof of a bit-perfect output. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 fun detectedLabel(f: androidx.media3.common.Format?): String? {
     f ?: return null
     val parts = listOfNotNull(

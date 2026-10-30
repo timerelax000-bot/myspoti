@@ -409,7 +409,8 @@ fun LyricsScreen(
     val bg by animateColorAsState(palette.background, tween(300), label = "lyricsBg")
     val playing = com.music.spotui.di.Graph.currentSongState.playingState.value
     val position = rememberPosition(playing)
-    val targetLanguage = getLyricTranslateLang(context).ifBlank { Locale.getDefault().language.ifBlank { "en" } }
+    val currentLocale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val targetLanguage = getLyricTranslateLang(context).ifBlank { currentLocale.language.ifBlank { "en" } }
     var menu by remember { mutableStateOf(false) }
     // What the song means, from Genius: asked once the lyrics are there; the button shows only when it says something.
     // Looked up when the song started (App.kt): here at once, and still here on coming back.

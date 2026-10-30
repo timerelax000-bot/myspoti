@@ -53,6 +53,7 @@ import kotlin.math.abs
  * once per track by aligning the YouTube Music song audio (same master as Spotify)
  * with the video's soundtrack ([AudioAlign]) and cached on disk.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object MusicVideoController {
     private const val TAG = "MusicVideo"
     private const val MIN_SCORE = 0.4
@@ -489,7 +490,7 @@ object MusicVideoController {
                         }
                     }
                 }
-                val target = files ?: return@launch
+                val target = files
                 val full = refineLock.withLock { coroutineScope {
                     val reference = async(Dispatchers.Default) {
                         runInterruptible { AudioAlign.features(AudioAlign.decode(target.reference)) }
@@ -707,7 +708,7 @@ object MusicVideoController {
         val withSound = clipSound.value && vs.audio != null
         val key = s.videoUrl + if (withSound) SOUND_KEY else ""
         if (warmedFor != key || p.playbackState == Player.STATE_IDLE) {
-            p.setMediaSource(if (withSound) androidx.media3.exoplayer.source.MergingMediaSource(true, vs.source, vs.audio!!) else vs.source)
+            p.setMediaSource(if (withSound) androidx.media3.exoplayer.source.MergingMediaSource(true, vs.source, vs.audio) else vs.source)
             p.prepare()
             warmedFor = key
         }

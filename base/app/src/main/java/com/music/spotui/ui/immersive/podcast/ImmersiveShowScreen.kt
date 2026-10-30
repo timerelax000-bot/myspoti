@@ -279,10 +279,11 @@ private fun ShowHeader(
             }
             val rating = show?.rating ?: 0.0
             if (rating > 0.0) {
+                val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
                 Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.Star, contentDescription = null, tint = Immersive.TextSecondary, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text(String.format(java.util.Locale.getDefault(), "%.1f", rating), style = Immersive.Subhead)
+                    Text(String.format(locale, "%.1f", rating), style = Immersive.Subhead)
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -302,7 +303,7 @@ private fun About(show: com.music.spotui.data.entity.PodcastModel?) {
     val authors = show?.authors.orEmpty().joinToString(", ")
     val narrators = show?.narrators.orEmpty().joinToString(", ")
     Column(Modifier.fillMaxWidth().padding(horizontal = Immersive.Gutter, vertical = 8.dp)) {
-        if (!show?.description.isNullOrBlank()) ImmersiveAboutText(show?.description.orEmpty(), maxLines = 8)
+        if (!show?.description.isNullOrBlank()) ImmersiveAboutText(show.description, maxLines = 8)
         if (authors.isNotBlank()) {
             Spacer(Modifier.height(12.dp))
             Text(stringResource(R.string.show_authors, authors), style = Immersive.Subhead)

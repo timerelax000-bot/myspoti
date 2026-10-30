@@ -373,11 +373,12 @@ private fun dayLabel(dayMs: Long?): String {
     if (dayMs == null) return ""
     val date = Instant.ofEpochMilli(dayMs).atZone(ZoneId.systemDefault()).toLocalDate()
     val today = LocalDate.now()
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
     return when (date) {
         today -> stringResource(R.string.recents_today)
         today.minusDays(1) -> stringResource(R.string.recents_yesterday)
         // Older days print as the official page does: day and short month, in the phone's language.
-        else -> date.format(DateTimeFormatter.ofPattern("d MMM", Locale.getDefault()))
+        else -> date.format(DateTimeFormatter.ofPattern("d MMM", locale))
     }
 }
 

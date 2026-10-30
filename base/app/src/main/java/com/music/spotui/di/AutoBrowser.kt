@@ -426,6 +426,7 @@ class ArtworkProvider : android.content.ContentProvider() {
     }
 
     override fun openFile(uri: Uri, mode: String): android.os.ParcelFileDescriptor? {
+        if (mode != "r") throw SecurityException("Read-only provider")
         // A downloaded song's cover: only a file that a download of the store names, never a path.
         uri.getQueryParameter("f")?.let { name ->
             val file = com.music.spotui.data.offline.OfflineStore.tracks.values.firstOrNull { it.cover == name }
@@ -434,10 +435,14 @@ class ArtworkProvider : android.content.ContentProvider() {
         }
         val url = uri.getQueryParameter("u") ?: return null
         if (!allowed(url)) return null
-        // Bounded: a binder thread must not wait on the network forever.
+        val ctx = context ?: return null
+        // First try disk cache only (fast, non-blocking on network)
         val file = runCatching {
-            com.bumptech.glide.Glide.with(context!!).asFile().load(url).submit()
-                .get(15, java.util.concurrent.TimeUnit.SECONDS)
+            com.bumptech.glide.Glide.with(ctx).asFile().load(url).onlyRetrieveFromCache(true).submit().get()
+        }.getOrNull() ?: runCatching {
+            // Bounded: a binder thread must not wait on the network forever.
+            com.bumptech.glide.Glide.with(ctx).asFile().load(url).submit()
+                .get(5, java.util.concurrent.TimeUnit.SECONDS)
         }.getOrNull() ?: return null
         return android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
     }

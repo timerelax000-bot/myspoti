@@ -2659,6 +2659,7 @@ object SongPlayer {
         }
 
     // Media cache for the looping Canvas video on the now-playing screen.
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     @Volatile private var mediaCache: androidx.media3.datasource.cache.SimpleCache? = null
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)

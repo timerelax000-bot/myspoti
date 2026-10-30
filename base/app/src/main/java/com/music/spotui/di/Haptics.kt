@@ -59,5 +59,5 @@ object Haptics {
     }
 
     /** A completed action (queued, removed, transferred). */
-    fun confirm() = perform(HapticFeedbackConstants.CONFIRM)
+    fun confirm() = perform(if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.CONTEXT_CLICK)
 }

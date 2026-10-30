@@ -273,8 +273,9 @@ private fun ArtistOverviewContent(
         // ── Monthly listeners (compact, like "4,3 M auditeurs et auditrices par mois") ──
         item {
             overview.monthlyListeners?.let {
+                val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
                 val compact = android.icu.text.CompactDecimalFormat
-                    .getInstance(java.util.Locale.getDefault(), android.icu.text.CompactDecimalFormat.CompactStyle.SHORT)
+                    .getInstance(locale, android.icu.text.CompactDecimalFormat.CompactStyle.SHORT)
                     .format(it)
                 Text(
                     text = stringResource(R.string.monthly_listeners_text, compact),

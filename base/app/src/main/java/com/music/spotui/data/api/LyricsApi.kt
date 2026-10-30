@@ -510,19 +510,23 @@ object LyricsApi {
                         wordStart = clock(p.getAttributeValue(null, "begin")); wordEnd = clock(p.getAttributeValue(null, "end")); word = StringBuilder()
                     }
                 }
-                org.xmlpull.v1.XmlPullParser.TEXT -> if (inBody && skipDepth == 0 && words != null) {
-                    val t = p.text
-                    if (wordStart >= 0) word.append(t)
-                    // Text between two words (a space): it belongs to the word before it.
-                    else if (words!!.isNotEmpty()) words!![words!!.lastIndex] = words!!.last().let { it.copy(text = it.text + t) }
-                    plain.append(t)
+                org.xmlpull.v1.XmlPullParser.TEXT -> {
+                    val w = words
+                    if (inBody && skipDepth == 0 && w != null) {
+                        val t = p.text
+                        if (wordStart >= 0) word.append(t)
+                        // Text between two words (a space): it belongs to the word before it.
+                        else if (w.isNotEmpty()) w[w.lastIndex] = w.last().let { it.copy(text = it.text + t) }
+                        plain.append(t)
+                    }
                 }
                 org.xmlpull.v1.XmlPullParser.END_TAG -> when {
                     skipDepth > 0 -> skipDepth--
                     p.name == "span" && wordStart >= 0 -> { words?.add(LyricWord(wordStart, wordEnd, word.toString())); wordStart = -1 }
                     p.name == "p" && words != null -> {
                         val text = plain.toString().replace(Regex("\\s+"), " ").trim()
-                        if (text.isNotEmpty() && lineStart >= 0) lines += LyricLine(lineStart, text, words!!.takeIf { it.isNotEmpty() })
+                        val w = words
+                        if (text.isNotEmpty() && lineStart >= 0) lines += LyricLine(lineStart, text, w.takeIf { it.isNotEmpty() })
                         words = null
                     }
                 }

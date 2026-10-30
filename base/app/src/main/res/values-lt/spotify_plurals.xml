@@ -4,21 +4,25 @@
     <plurals name="liked_songs_header_metadata_text">
         <item quantity="one">%1$d daina</item>
         <item quantity="few">%1$d dainos</item>
+        <item quantity="many">%1$d dainų</item>
         <item quantity="other">%1$d dainų</item>
     </plurals>
     <plurals name="profile_list_item_saves_count">
         <item quantity="one">%1$,d įsirašymas</item>
         <item quantity="few">%1$,d įsirašymai</item>
+        <item quantity="many">%1$,d įsirašymų</item>
         <item quantity="other">%1$,d įsirašymų</item>
     </plurals>
     <plurals name="add_to_playlist_folder_subtitle_playlists_count">
         <item quantity="one">%1$s grojaraštis</item>
         <item quantity="few">%1$s grojaraščiai</item>
+        <item quantity="many">%1$s grojaraščių</item>
         <item quantity="other">%1$s grojaraščių</item>
     </plurals>
     <plurals name="add_to_playlist_subtitle_songs_count">
         <item quantity="one">%1$s daina</item>
         <item quantity="few">%1$s dainos</item>
+        <item quantity="many">%1$s dainų</item>
         <item quantity="other">%1$s dainų</item>
     </plurals>
 </resources>

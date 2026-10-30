@@ -719,6 +719,7 @@ object LocalPlayer {
      * ExoPlayer repeats a queue of several songs itself; a song that follows itself (repeat one, a
      * queue of one song repeated) pauses at its end and is played again by [playAgain].
      */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun applyRepeat(p: ExoPlayer) {
         p.repeatMode = LocalRepeat.playerMode(repeat, p.mediaItemCount)
         p.pauseAtEndOfMediaItems = LocalRepeat.loopsSong(repeat, p.mediaItemCount)
@@ -785,6 +786,7 @@ object LocalPlayer {
     fun position() = if (CastPlayback.active) CastPlayback.position() else exo?.currentPosition ?: 0L
     fun duration() = exo?.duration?.takeIf { it > 0 } ?: current()?.durationMs ?: 0L
     /** The format the decoder reports for the song playing (its input; Android may resample), or null. */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun audioFormat(): androidx.media3.common.Format? = if (CastPlayback.active) null else exo?.audioFormat
     /** The length the player knows of the audio itself (null: not known), never Spotify's. */
     fun knownLength(): Long? = if (CastPlayback.active) null else exo?.duration?.takeIf { it != C.TIME_UNSET && it > 0 }

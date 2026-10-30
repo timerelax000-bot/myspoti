@@ -84,7 +84,7 @@ fun VideoSurface(modifier: Modifier = Modifier, active: Boolean = true, fitHeigh
     DisposableEffect(player, view, active, mine) {
         val v = view
         val attached = player != null && v != null && active && mine
-        if (attached) { player!!.setVideoTextureView(v); MusicVideoController.surfaces++ }
+        if (attached) { player.setVideoTextureView(v); MusicVideoController.surfaces++ }
         onDispose {
             if (attached) MusicVideoController.surfaces--
             if (player != null && v != null) player.clearVideoTextureView(v)

@@ -70,7 +70,7 @@ object OfflineCrypto {
         val fileKey = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, newMaster) }
         val sealed = c.iv + c.doFinal(fileKey)
-        prefs.edit().putString("key", android.util.Base64.encodeToString(sealed, android.util.Base64.NO_WRAP)).commit()
+        prefs.edit().putString("key", android.util.Base64.encodeToString(sealed, android.util.Base64.NO_WRAP)).apply()
         return SecretKeySpec(fileKey, "AES")
     }
 

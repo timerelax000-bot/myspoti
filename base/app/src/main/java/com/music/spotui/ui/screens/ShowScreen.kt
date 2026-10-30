@@ -306,6 +306,7 @@ private fun Header(
         // Rating, as the official header shows it under the cover.
         val rating = show?.rating ?: 0.0
         if (rating > 0.0) {
+            val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(start = 16.dp, top = 12.dp),
@@ -313,7 +314,7 @@ private fun Header(
                 Icon(Icons.Default.Star, contentDescription = null, tint = AppText.copy(alpha = 0.8f), modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    text = String.format(java.util.Locale.getDefault(), "%.1f", rating),
+                    text = String.format(locale, "%.1f", rating),
                     color = AppText.copy(alpha = 0.8f),
                     fontSize = 13.sp,
                 )

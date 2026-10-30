@@ -55,6 +55,16 @@
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
 
+        <!-- Background playback, notification and Android Auto MediaBrowserService -->
+        <service
+            android:name="app.myspoti.host.android.PlaybackService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+
         <meta-data
             android:name="firebase_analytics_collection_deactivated"
             android:value="true" />
