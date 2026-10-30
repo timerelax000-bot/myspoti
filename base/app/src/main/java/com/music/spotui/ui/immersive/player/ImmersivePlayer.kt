@@ -56,9 +56,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.OndemandVideo
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -232,6 +234,38 @@ fun ImmersivePlayer(
     val pauseScale = rememberPauseScale(state.playing)
     val volume = rememberPlayerVolume()
 
+    val mv = com.music.spotui.video.MusicVideoController
+    val actualTrackId = state.trackId
+    val songTitle = state.title
+    val songSinger = state.artist
+    val audioBuffering = state.buffering
+
+    androidx.compose.runtime.DisposableEffect(mv) {
+        mv.attachPlayerScreen()
+        com.music.spotui.di.SongPlayer.refreshLikedIfStale()
+        onDispose { mv.detachPlayerScreen() }
+    }
+
+    LaunchedEffect(actualTrackId, songTitle, audioBuffering) {
+        if (actualTrackId.isNotBlank() && !audioBuffering && com.music.spotui.data.preferences.MusicVideoPref.on) {
+            mv.prepare(actualTrackId, songTitle, songSinger, com.music.spotui.di.SongPlayer.getDuration())
+        }
+    }
+
+    val remote = com.music.spotui.di.SongPlayer.activeDevice.value != null
+    val videoState = mv.state.value
+    val readyVideo = videoState as? com.music.spotui.video.MusicVideoController.State.Ready
+    val videoMatchesTrack = actualTrackId.isNotBlank() && readyVideo?.trackId == actualTrackId
+    val videoReady = videoMatchesTrack && !remote && !audioBuffering && !com.music.spotui.data.DataSaver.active &&
+            com.music.spotui.data.preferences.MusicVideoPref.on
+    val videoSearching = videoState is com.music.spotui.video.MusicVideoController.State.Searching
+    val videoOn = mv.on.value && videoMatchesTrack && !remote && com.music.spotui.data.preferences.MusicVideoPref.on
+    val videoFullscreen = mv.fullscreen.value
+
+    LaunchedEffect(videoState, remote, audioBuffering, actualTrackId) {
+        if (videoReady && !audioBuffering) mv.warm()
+    }
+
     // The song's Canvas, behind the player once its first frame is drawn. The cover opens into it:
     // the clip fades in from a little closer while the sleeve grows and fades away. The lyrics or
     // the queue close it the same way back: the clip (paused under them) fades out to the cover's
@@ -241,7 +275,7 @@ fun ImmersivePlayer(
     var canvasShown by remember(canvasUrl) {
         mutableStateOf(canvasUrl != null && com.music.spotui.ui.components.CanvasPlayer.isReady(canvasUrl))
     }
-    val canvasOn = canvasUrl != null && canvasShown && !state.adPlaying && panel == Panel.NONE
+    val canvasOn = canvasUrl != null && canvasShown && !state.adPlaying && panel == Panel.NONE && !videoOn
     // Opening on a clip already showing starts at the end; every later change animates from where it is.
     val canvasOpen = remember { androidx.compose.animation.core.Animatable(if (canvasOn) 1f else 0f) }
     // Opening the player: the heart of the song shown is checked again if its state is old.
@@ -265,7 +299,7 @@ fun ImmersivePlayer(
         val landscape = maxWidth > maxHeight || window.twoPane
         val sidePane = window.large && maxWidth >= SIDE_PANE_MIN_WIDTH
         PlayerBackdrop(palette, outgoingPalette, blend, state.coverUrl)
-        if (canvasUrl != null) {
+        if (canvasUrl != null && !videoOn) {
             com.music.spotui.ui.screens.CanvasVideo(
                 url = canvasUrl,
                 onFirstFrame = { canvasShown = true },
@@ -377,20 +411,60 @@ fun ImmersivePlayer(
                                 if (panel != Panel.NONE) panel = Panel.NONE
                             },
                     ) {
-                        GlideImage(
-                            model = state.coverUrl.takeIf { it.isNotBlank() },
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            transition = CrossFade,
-                            loading = placeholder(R.drawable.placeholder),
-                            failure = placeholder(R.drawable.placeholder),
-                            modifier = Modifier.fillMaxSize(),
-                            // The box shrinks to the 60dp header thumbnail and grows back: Glide sizes the
-                            // request from the constraints it first sees, so without a fixed size a cover
-                            // first measured (or reloaded) while collapsed stays a small bitmap.
-                            requestBuilderTransform = { it.override(COVER_DECODE_PX) },
+                        if (videoOn) {
+                            Box(Modifier.fillMaxSize()) {
+                                com.music.spotui.ui.components.VideoSurface(
+                                    modifier = Modifier.fillMaxSize(),
+                                    onTap = { com.music.spotui.video.MusicVideoController.fullscreen.value = true },
+                                )
+                                com.music.spotui.ui.components.VideoFullscreenButton(
+                                    Modifier.align(Alignment.BottomEnd).padding(4.dp),
+                                )
+                                if (com.music.spotui.video.MusicVideoController.fullscreen.value) {
+                                    com.music.spotui.ui.components.VideoFullscreenOverlay()
+                                }
+                            }
+                        } else {
+                            GlideImage(
+                                model = state.coverUrl.takeIf { it.isNotBlank() },
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                transition = CrossFade,
+                                loading = placeholder(R.drawable.placeholder),
+                                failure = placeholder(R.drawable.placeholder),
+                                modifier = Modifier.fillMaxSize(),
+                                // The box shrinks to the 60dp header thumbnail and grows back: Glide sizes the
+                                // request from the constraints it first sees, so without a fixed size a cover
+                                // first measured (or reloaded) while collapsed stays a small bitmap.
+                                requestBuilderTransform = { it.override(COVER_DECODE_PX) },
+                            )
+                            SongBlendCover(blend, Modifier.fillMaxSize()) { it.override(COVER_DECODE_PX) }
+                        }
+                    }
+
+                    // Video Switch Pill (Audio / Video & Clip Sound switcher) in portrait
+                    if ((videoReady || videoOn) && panel == Panel.NONE) {
+                        val pillIn by animateFloatAsState(
+                            targetValue = if (videoReady || videoOn) 1f else 0f,
+                            animationSpec = tween(250),
+                            label = "immersivePillIn",
                         )
-                        SongBlendCover(blend, Modifier.fillMaxSize()) { it.override(COVER_DECODE_PX) }
+                        if (pillIn > 0f) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .offset {
+                                        IntOffset(
+                                            left.roundToPx(),
+                                            (titleTop() - 38.dp).roundToPx(),
+                                        )
+                                    }
+                                    .graphicsLayer { alpha = pillIn },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                com.music.spotui.ui.components.VideoSwitchPill(on = videoOn)
+                            }
+                        }
                     }
 
                     // ---- Title + round glyphs ----
@@ -444,10 +518,17 @@ fun ImmersivePlayer(
                 }
             }
         }
-    }
 
-    if (showDevices) DevicesSheet { showDevices = false }
-    if (showQuality) com.music.spotui.ui.components.QualitySheet { showQuality = false }
+        if (videoFullscreen) {
+            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                com.music.spotui.ui.components.VideoSurface(fitHeight = true)
+                com.music.spotui.ui.components.VideoFullscreenOverlay()
+            }
+        }
+        if (com.music.spotui.video.MusicVideoController.inPip.value) {
+            com.music.spotui.ui.components.PipVideo()
+        }
+    }
     val song = state.song
     if (showMenu && song != null && navController != null) {
         ImmersiveSongOptionsSheet(
@@ -601,6 +682,41 @@ private fun RowScope.PlayerCredits(
         )
     }
     Spacer(Modifier.width(10.dp))
+    val mv = com.music.spotui.video.MusicVideoController
+    val videoState = mv.state.value
+    val readyVideo = videoState as? com.music.spotui.video.MusicVideoController.State.Ready
+    val videoMatchesTrack = state.trackId.isNotBlank() && readyVideo?.trackId == state.trackId
+    val videoReady = videoMatchesTrack && com.music.spotui.data.preferences.MusicVideoPref.on
+    val videoSearching = videoState is com.music.spotui.video.MusicVideoController.State.Searching
+    val videoOn = mv.on.value && videoMatchesTrack && com.music.spotui.data.preferences.MusicVideoPref.on
+
+    if (videoReady || videoOn || videoSearching) {
+        if (videoSearching) {
+            Box(
+                modifier = Modifier.size(34.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    color = tint.copy(alpha = 0.7f),
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        } else {
+            CircleGlyph(
+                icon = androidx.compose.material.icons.Icons.Default.OndemandVideo,
+                contentDescription = stringResource(if (videoOn) R.string.av_switch_to_audio else R.string.av_switch_to_video),
+                onClick = {
+                    if (!videoOn) {
+                        mv.setOn(true)
+                    }
+                    mv.fullscreen.value = true
+                },
+                active = videoOn,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+    }
     // Beside the credits rather than in the toggle row: liking is about this song.
     CircleGlyph(
         icon = if (state.liked) Icons.Rounded.Star else Icons.Rounded.StarBorder,
@@ -687,6 +803,10 @@ private fun LandscapePlayer(
     onSource: () -> Unit,
     sidePane: Boolean = false,
 ) {
+    val videoState by remember { com.music.spotui.video.MusicVideoController.state }
+    val videoOn by remember { com.music.spotui.video.MusicVideoController.on }
+    val videoReady = videoState is com.music.spotui.video.MusicVideoController.State.Ready
+
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
         // The handle: always hands its drags to the sheet.
         Box(
@@ -723,17 +843,29 @@ private fun LandscapePlayer(
                                     .background(Color.Black.copy(alpha = 0.18f))
                                     .dragToClose(),
                             ) {
-                                GlideImage(
-                                    model = state.coverUrl.takeIf { it.isNotBlank() },
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    transition = CrossFade,
-                                    loading = placeholder(R.drawable.placeholder),
-                                    failure = placeholder(R.drawable.placeholder),
-                                    modifier = Modifier.fillMaxSize(),
-                                    requestBuilderTransform = { it.override(COVER_DECODE_PX) },
-                                )
-                                SongBlendCover(state.blend, Modifier.fillMaxSize()) { it.override(COVER_DECODE_PX) }
+                                if (videoOn) {
+                                    Box(Modifier.fillMaxSize()) {
+                                        com.music.spotui.ui.components.VideoSurface(
+                                            modifier = Modifier.fillMaxSize(),
+                                            onTap = { com.music.spotui.video.MusicVideoController.fullscreen.value = true },
+                                        )
+                                        com.music.spotui.ui.components.VideoFullscreenButton(
+                                            Modifier.align(Alignment.BottomEnd).padding(4.dp),
+                                        )
+                                    }
+                                } else {
+                                    GlideImage(
+                                        model = state.coverUrl.takeIf { it.isNotBlank() },
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        transition = CrossFade,
+                                        loading = placeholder(R.drawable.placeholder),
+                                        failure = placeholder(R.drawable.placeholder),
+                                        modifier = Modifier.fillMaxSize(),
+                                        requestBuilderTransform = { it.override(COVER_DECODE_PX) },
+                                    )
+                                    SongBlendCover(state.blend, Modifier.fillMaxSize()) { it.override(COVER_DECODE_PX) }
+                                }
                             }
                         }
                     }
@@ -743,6 +875,11 @@ private fun LandscapePlayer(
                 // The volume bar is the first thing to go when the window is low: the hardware keys do it too.
                 val showVolume = maxHeight >= LANDSCAPE_VOLUME_MIN_HEIGHT
                 Column(Modifier.widthIn(max = PLAYER_MAX_WIDTH).verticalScroll(rememberScrollState())) {
+                    if (videoReady || videoOn) {
+                        Box(Modifier.fillMaxWidth().padding(bottom = 8.dp), contentAlignment = Alignment.Center) {
+                            com.music.spotui.ui.components.VideoSwitchPill(on = videoOn)
+                        }
+                    }
                     Row(Modifier.fillMaxWidth().height(HEADER_HEIGHT), verticalAlignment = Alignment.CenterVertically) {
                         PlayerCredits(state, actions, tint, scrolls = true, collapse = { 0f }, onMore = onMore, onSource = onSource)
                     }

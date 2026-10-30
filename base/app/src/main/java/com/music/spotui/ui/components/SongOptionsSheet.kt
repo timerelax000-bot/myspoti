@@ -28,6 +28,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -170,6 +172,22 @@ fun SongOptionsSheet(
                 SongPlayer.setTrackSaved(song.spotifyTrackId, !liked)
                 toast(context.getString(if (liked) R.string.snackbar_removed_from_liked_songs else R.string.snackbar_added_to_liked_songs))
                 onDismiss()
+            }
+            val videoState = com.music.spotui.video.MusicVideoController.state.value
+            val videoReady = videoState is com.music.spotui.video.MusicVideoController.State.Ready
+            val videoOn = com.music.spotui.video.MusicVideoController.on.value
+            val clipSound = com.music.spotui.video.MusicVideoController.clipSound.value
+
+            if (videoReady || videoOn) {
+                MenuRow(
+                    icon = if (clipSound) androidx.compose.material.icons.Icons.Default.VolumeUp else androidx.compose.material.icons.Icons.Default.MusicNote,
+                    label = stringResource(if (clipSound) R.string.clip_sound_clip else R.string.clip_sound_song),
+                ) {
+                    com.music.spotui.video.MusicVideoController.setClipSound(!clipSound)
+                    val hint = context.getString(if (clipSound) R.string.clip_sound_off_hint else R.string.clip_sound_on_hint)
+                    toast(hint)
+                    onDismiss()
+                }
             }
             MenuRow(Icons.AutoMirrored.Filled.PlaylistAdd, stringResource(R.string.context_menu_add_to_playlist), enabled = hasId) { showSavedIn = true }
             // Copy into another playlist: one tap, one target, said out loud by the toast.

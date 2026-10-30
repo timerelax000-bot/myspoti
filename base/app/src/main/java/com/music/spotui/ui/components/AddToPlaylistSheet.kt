@@ -74,6 +74,17 @@ fun AddToPlaylistSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var playlists by remember { mutableStateOf<List<EditablePlaylist>?>(null) }
     var query by remember { mutableStateOf("") }
+    var adding by remember { mutableStateOf(false) }
+
+    val targetTrackId = remember(song) {
+        val raw = song.spotifyTrackId.ifBlank {
+            if (song.url.contains("spotify:track:") || song.url.contains("/track/")) {
+                song.url.substringAfterLast("/track/").substringBefore('?').substringAfterLast(':')
+            } else ""
+        }
+        SpotifySync.cleanId(raw)
+    }
+
     LaunchedEffect(Unit) {
         // Folders flattened: adding to a playlist does not need the folder tree.
         playlists = EditablePlaylists.loadWithCovers()
@@ -84,14 +95,21 @@ fun AddToPlaylistSheet(
     }
 
     fun addTo(playlist: EditablePlaylist) {
-        onDismiss()
-        SpotifySync.addTrackToPlaylist(context, playlist.id, song.spotifyTrackId) { ok ->
+        if (adding) return
+        if (targetTrackId.isBlank()) {
+            Toast.makeText(context, R.string.playlist_change_refused, Toast.LENGTH_SHORT).show()
+            onDismiss()
+            return
+        }
+        adding = true
+        SpotifySync.addTrackToPlaylist(context, playlist.id, targetTrackId) { ok ->
             // The write runs on the main dispatcher already; posted anyway so the toast
             // survives the sheet's teardown.
             Handler(Looper.getMainLooper()).post {
                 val text = if (ok) context.getString(R.string.local_added_to, playlist.name)
                 else context.getString(R.string.playlist_change_refused)
                 Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+                onDismiss()
             }
         }
     }

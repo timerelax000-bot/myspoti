@@ -9,6 +9,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
@@ -111,6 +113,22 @@ fun ImmersiveSongOptionsSheet(
             SongPlayer.setTrackSaved(song.spotifyTrackId, !liked)
             toast(context.getString(if (liked) R.string.snackbar_removed_from_liked_songs else R.string.snackbar_added_to_liked_songs))
             onDismiss()
+        }
+        val videoState = com.music.spotui.video.MusicVideoController.state.value
+        val videoReady = videoState is com.music.spotui.video.MusicVideoController.State.Ready
+        val videoOn = com.music.spotui.video.MusicVideoController.on.value
+        val clipSound = com.music.spotui.video.MusicVideoController.clipSound.value
+
+        if (videoReady || videoOn) {
+            ImmersiveSheetRow(
+                icon = if (clipSound) androidx.compose.material.icons.Icons.Default.VolumeUp else androidx.compose.material.icons.Icons.Default.MusicNote,
+                label = stringResource(if (clipSound) R.string.clip_sound_clip else R.string.clip_sound_song),
+            ) {
+                com.music.spotui.video.MusicVideoController.setClipSound(!clipSound)
+                val hint = context.getString(if (clipSound) R.string.clip_sound_off_hint else R.string.clip_sound_on_hint)
+                toast(hint)
+                onDismiss()
+            }
         }
         ImmersiveSheetRow(Icons.AutoMirrored.Rounded.PlaylistAdd, stringResource(R.string.context_menu_add_to_playlist), enabled = hasId) { showSavedIn = true }
         ImmersiveSheetRow(Icons.AutoMirrored.Rounded.PlaylistAdd, stringResource(R.string.context_menu_add_to_another_playlist), enabled = hasId) { showAddTo = true }

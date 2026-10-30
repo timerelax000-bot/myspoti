@@ -34,14 +34,33 @@ object SpotifySync {
         if (artistId.isNotBlank()) com.music.spotui.di.SongPlayer.setSaved("spotify:artist:$artistId", followed)
     }
 
+    /** Extracts raw 22-char Spotify ID from any URI, URL, or prefixed string. */
+    fun cleanId(raw: String): String {
+        val s = raw.trim()
+        if (s.isBlank()) return ""
+        return s.removePrefix("spotify:playlist:")
+            .removePrefix("spotify:track:")
+            .removePrefix("spotify:album:")
+            .removePrefix("spotify:artist:")
+            .substringAfterLast('/')
+            .substringBefore('?')
+            .substringAfterLast(':')
+    }
+
     /** Adds a track to one of the user's playlists. */
     fun addTrackToPlaylist(context: Context, playlistId: String, trackId: String, onDone: (Boolean) -> Unit = {}) {
-        if (playlistId.isBlank() || trackId.isBlank()) { onDone(false); return }
+        val cleanPl = cleanId(playlistId)
+        val cleanTr = cleanId(trackId)
+        if (cleanPl.isBlank() || cleanTr.isBlank()) { onDone(false); return }
         scope.launch {
-            val ok = runCatching { api.playlists.addTracks("spotify:playlist:$playlistId", listOf("spotify:track:$trackId")) }
-                .onFailure { Log.w(TAG, "add $trackId to $playlistId failed: ${it.message}") }.isSuccess
-            if (ok) { membershipCache[playlistId]?.add(trackId); Api.invalidatePlaylist(playlistId) }
-            if (ok) com.music.spotui.data.offline.OfflineCollections.refreshOne(context.applicationContext, "spotify:playlist:$playlistId")
+            val ok = runCatching { api.playlists.addTracks("spotify:playlist:$cleanPl", listOf("spotify:track:$cleanTr")) }
+                .onFailure { Log.w(TAG, "add $cleanTr to $cleanPl failed: ${it.message}") }.isSuccess
+            if (ok) {
+                membershipCache[cleanPl]?.add(cleanTr)
+                Api.invalidatePlaylist(cleanPl)
+                com.music.spotui.data.offline.OfflineCollections.refreshOne(context.applicationContext, "spotify:playlist:$cleanPl")
+                LibraryEdits.reloadSoon()
+            }
             onDone(ok)
         }
     }
@@ -52,13 +71,16 @@ object SpotifySync {
      * does not cancel it. [onDone] gets whether Spotify took all of it.
      */
     fun addUrisToPlaylist(context: Context, playlistId: String, uris: List<String>, onDone: (Boolean) -> Unit = {}) {
-        if (playlistId.isBlank() || uris.isEmpty()) { onDone(false); return }
+        val cleanPl = cleanId(playlistId)
+        val cleanUris = uris.map { cleanId(it) }.filter { it.isNotBlank() }.map { "spotify:track:$it" }
+        if (cleanPl.isBlank() || cleanUris.isEmpty()) { onDone(false); return }
         scope.launch {
-            val ok = runCatching { api.playlists.addTracks("spotify:playlist:$playlistId", uris) }
-                .onFailure { Log.w(TAG, "add ${uris.size} songs to $playlistId failed: ${it.message}") }.isSuccess
+            val ok = runCatching { api.playlists.addTracks("spotify:playlist:$cleanPl", cleanUris) }
+                .onFailure { Log.w(TAG, "add ${cleanUris.size} songs to $cleanPl failed: ${it.message}") }.isSuccess
             // Part of it may be in even when refused: read the playlist again when asked.
-            membershipCache.remove(playlistId); Api.invalidatePlaylist(playlistId)
-            com.music.spotui.data.offline.OfflineCollections.refreshOne(context.applicationContext, "spotify:playlist:$playlistId")
+            membershipCache.remove(cleanPl); Api.invalidatePlaylist(cleanPl)
+            com.music.spotui.data.offline.OfflineCollections.refreshOne(context.applicationContext, "spotify:playlist:$cleanPl")
+            if (ok) LibraryEdits.reloadSoon()
             onDone(ok)
         }
     }
@@ -69,16 +91,18 @@ object SpotifySync {
      * cache) the first row of that song goes, never all of them.
      */
     fun removeRowFromPlaylist(context: Context, playlistId: String, trackId: String, rowUid: String, onDone: (Boolean) -> Unit = {}) {
-        if (playlistId.isBlank() || (trackId.isBlank() && rowUid.isBlank())) { onDone(false); return }
+        val cleanPl = cleanId(playlistId)
+        val cleanTr = cleanId(trackId)
+        if (cleanPl.isBlank() && rowUid.isBlank()) { onDone(false); return }
         scope.launch {
             val ok = runCatching {
-                val uri = "spotify:playlist:$playlistId"
-                val uid = rowUid.ifBlank { allTracks(uri).firstOrNull { it.uri == "spotify:track:$trackId" }?.uid }
+                val uri = "spotify:playlist:$cleanPl"
+                val uid = rowUid.ifBlank { allTracks(uri).firstOrNull { cleanId(it.uri) == cleanTr }?.uid }
                 checkNotNull(uid) { "track not in playlist" }
                 api.playlists.removeTracks(uri, listOf(uid))
-            }.onFailure { Log.w(TAG, "remove row $rowUid ($trackId) from $playlistId failed: ${it.message}") }.isSuccess
+            }.onFailure { Log.w(TAG, "remove row $rowUid ($cleanTr) from $cleanPl failed: ${it.message}") }.isSuccess
             // The song may still be in the playlist through another row: read it again when asked.
-            if (ok) { membershipCache.remove(playlistId); Api.invalidatePlaylist(playlistId) }
+            if (ok) { membershipCache.remove(cleanPl); Api.invalidatePlaylist(cleanPl); LibraryEdits.reloadSoon() }
             onDone(ok)
         }
     }
@@ -88,15 +112,17 @@ object SpotifySync {
      * sheet's switch means "this song is not in that playlist any more".
      */
     fun removeTrackFromPlaylist(context: Context, playlistId: String, trackId: String, onDone: (Boolean) -> Unit = {}) {
-        if (playlistId.isBlank() || trackId.isBlank()) { onDone(false); return }
+        val cleanPl = cleanId(playlistId)
+        val cleanTr = cleanId(trackId)
+        if (cleanPl.isBlank() || cleanTr.isBlank()) { onDone(false); return }
         scope.launch {
             val ok = runCatching {
-                val uri = "spotify:playlist:$playlistId"
-                val uids = allTracks(uri).filter { it.uri == "spotify:track:$trackId" }.mapNotNull { it.uid }
+                val uri = "spotify:playlist:$cleanPl"
+                val uids = allTracks(uri).filter { cleanId(it.uri) == cleanTr }.mapNotNull { it.uid }
                 check(uids.isNotEmpty()) { "track not in playlist" }
                 api.playlists.removeTracks(uri, uids)
-            }.onFailure { Log.w(TAG, "remove $trackId from $playlistId failed: ${it.message}") }.isSuccess
-            if (ok) { membershipCache[playlistId]?.remove(trackId); Api.invalidatePlaylist(playlistId) }
+            }.onFailure { Log.w(TAG, "remove $cleanTr from $cleanPl failed: ${it.message}") }.isSuccess
+            if (ok) { membershipCache[cleanPl]?.remove(cleanTr); Api.invalidatePlaylist(cleanPl); LibraryEdits.reloadSoon() }
             onDone(ok)
         }
     }
