@@ -481,6 +481,66 @@ private fun DisplayPage(open: (SettingsPage) -> Unit, back: () -> Unit) {
                 )
             }
         }
+        immersiveGroup("tv_desktop") {
+            row {
+                ImmersiveGroupRow(
+                    "Default TV layout",
+                    value = when (com.music.spotui.data.preferences.TvModePref.layoutPreset) {
+                        com.music.spotui.data.preferences.TvModePref.LAYOUT_CINEMA -> "Cinema"
+                        com.music.spotui.data.preferences.TvModePref.LAYOUT_LYRICS -> "Lyrics"
+                        com.music.spotui.data.preferences.TvModePref.LAYOUT_MINIMAL -> "Minimal"
+                        else -> "Balanced"
+                    },
+                    onClick = {
+                        val next = when (com.music.spotui.data.preferences.TvModePref.layoutPreset) {
+                            com.music.spotui.data.preferences.TvModePref.LAYOUT_BALANCED -> com.music.spotui.data.preferences.TvModePref.LAYOUT_CINEMA
+                            com.music.spotui.data.preferences.TvModePref.LAYOUT_CINEMA -> com.music.spotui.data.preferences.TvModePref.LAYOUT_LYRICS
+                            com.music.spotui.data.preferences.TvModePref.LAYOUT_LYRICS -> com.music.spotui.data.preferences.TvModePref.LAYOUT_MINIMAL
+                            else -> com.music.spotui.data.preferences.TvModePref.LAYOUT_BALANCED
+                        }
+                        com.music.spotui.data.preferences.TvModePref.setLayout(ctx, next)
+                    },
+                )
+            }
+            row {
+                ImmersiveGroupRow(
+                    "Auto-hide controls",
+                    value = if (com.music.spotui.data.preferences.TvModePref.autoHideSeconds == 0) "Never" else "${com.music.spotui.data.preferences.TvModePref.autoHideSeconds}s",
+                    onClick = {
+                        val next = when (com.music.spotui.data.preferences.TvModePref.autoHideSeconds) {
+                            0 -> 2
+                            2 -> 5
+                            5 -> 8
+                            else -> 0
+                        }
+                        com.music.spotui.data.preferences.TvModePref.setAutoHide(ctx, next)
+                    },
+                )
+            }
+            row {
+                ImmersiveGroupRow(
+                    "Ambient screensaver",
+                    value = if (com.music.spotui.data.preferences.TvModePref.ambientSeconds == 0) "Never" else "${com.music.spotui.data.preferences.TvModePref.ambientSeconds}s",
+                    onClick = {
+                        val next = when (com.music.spotui.data.preferences.TvModePref.ambientSeconds) {
+                            0 -> 15
+                            15 -> 30
+                            30 -> 60
+                            else -> 0
+                        }
+                        com.music.spotui.data.preferences.TvModePref.setAmbient(ctx, next)
+                    },
+                )
+            }
+            row {
+                ImmersiveSwitchRow(
+                    "Up Next preview card",
+                    checked = com.music.spotui.data.preferences.TvModePref.upNextEnabled,
+                    onChecked = { com.music.spotui.data.preferences.TvModePref.setUpNext(ctx, it) },
+                    detail = "Announce upcoming song 12s before track ends",
+                )
+            }
+        }
     }
 }
 

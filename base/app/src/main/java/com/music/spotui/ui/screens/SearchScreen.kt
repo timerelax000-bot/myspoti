@@ -18,6 +18,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.hoverable
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -570,16 +574,24 @@ fun SearchSongRow(
     val currentPlayingIndicatorColor =
         if (song.id == searchViewModel.currentSongId.value) Color(AppPalette.toArgb()) else AppText
 
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+
     Row(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
+            .pointerHoverIcon(PointerIcon.Hand)
+            .hoverable(interactionSource)
+            .then(
+                if (isHovered) Modifier.background(Color.White.copy(alpha = 0.06f)) else Modifier
+            )
             .padding(16.dp, 8.dp)
             // A mouse's right click opens the same menu as the long press (DeX, tablets).
             .secondaryClick(onLongClick)
             .combinedClickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
                 onLongClick = onLongClick,
                 onClick = {

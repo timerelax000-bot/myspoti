@@ -121,6 +121,12 @@ private const val SKIP_MS = 15_000L
 @OptIn(ExperimentalGlideComposeApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun ImmersivePodcastPlayer(navController: NavController) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+
     val bridge = rememberImmersivePlayer(navController)
     val state = bridge.state
     val actions = bridge.actions

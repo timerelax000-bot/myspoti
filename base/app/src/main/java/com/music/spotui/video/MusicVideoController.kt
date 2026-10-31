@@ -621,6 +621,7 @@ object MusicVideoController {
     @Volatile var surfaces = 0
         set(value) {
             field = value.coerceAtLeast(0)
+            if (value > 0) lastSurfacePresentTime = SystemClock.elapsedRealtime()
             surfaceIdleJob?.cancel()
             surfaceIdleJob = null
             if (field > 0) {
@@ -633,6 +634,8 @@ object MusicVideoController {
                 }
             }
         }
+    @Volatile private var lastSurfacePresentTime = 0L
+    private val effectiveSurfaces: Int get() = if (surfaces > 0 || SystemClock.elapsedRealtime() - lastSurfacePresentTime < 800) 1 else 0
     // Set by the activity's onStart / onStop; nothing is on screen before the first start.
     @Volatile private var appVisible = false
     /** The app is on screen (look-ups at track start then, not in the background). */
@@ -864,7 +867,7 @@ object MusicVideoController {
                 // The full map replaces the quick one when [refine] finishes.
                 val map = (state.value as? State.Ready)?.map ?: initial
                 val playing = SongPlayer.isPlaying()
-                val shown = playing && !SongPlayer.isBuffering && appVisible && surfaces > 0 && SongPlayer.activeDevice.value == null
+                val shown = playing && !SongPlayer.isBuffering && appVisible && effectiveSurfaces > 0 && SongPlayer.activeDevice.value == null
                 if (p.playWhenReady != shown) p.playWhenReady = shown
                 // Clip sound: the song goes unheard only while the clip is really playing with its
                 // sound; buffering, paused, an ad or anything else, the song is heard again at once.

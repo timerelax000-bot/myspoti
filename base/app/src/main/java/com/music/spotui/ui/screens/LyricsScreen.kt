@@ -1,6 +1,7 @@
 package com.music.spotui.ui.screens
 
 import com.music.spotui.ui.components.secondaryClick
+import com.music.spotui.ui.components.desktopClickable
 import com.music.spotui.ui.look.lastPress
 import com.music.spotui.ui.look.tapTime
 import com.music.spotui.ui.look.toSwept
@@ -444,9 +445,10 @@ fun LyricsScreen(
         ) {
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(48.dp).clickable(
-                    interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose,
-                ),
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .desktopClickable(minTargetSize = 48.dp, hoverHighlight = true, shape = CircleShape, onClick = onClose),
             ) {
                 Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.lyrics_fullscreen_close_button_readout_value), tint = palette.highlight, modifier = Modifier.size(32.dp))
             }
@@ -457,9 +459,12 @@ fun LyricsScreen(
             meaning?.takeIf { !it.about.isNullOrBlank() }?.let { m ->
                 Box(
                     contentAlignment = Alignment.Center,
-                    modifier = Modifier.size(48.dp).clickable(
-                        interactionSource = remember { MutableInteractionSource() }, indication = null,
-                    ) { meaningOpen = true },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .desktopClickable(minTargetSize = 48.dp, hoverHighlight = true, shape = CircleShape) {
+                            meaningOpen = true
+                        },
                 ) {
                     Icon(Icons.Outlined.Lightbulb, contentDescription = stringResource(R.string.lyrics_meaning_title), tint = palette.highlight)
                 }
@@ -468,9 +473,12 @@ fun LyricsScreen(
             Box {
                 Box(
                     contentAlignment = Alignment.Center,
-                    modifier = Modifier.size(48.dp).clickable(
-                        interactionSource = remember { MutableInteractionSource() }, indication = null,
-                    ) { menu = true },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .desktopClickable(minTargetSize = 48.dp, hoverHighlight = true, shape = CircleShape) {
+                            menu = true
+                        },
                 ) {
                     Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.content_description_context_menu), tint = palette.highlight)
                 }
@@ -649,7 +657,7 @@ private fun LyricsChip(label: String, icon: Int, active: Boolean, loading: Boole
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .background(if (active) palette.highlight else Color.Black.copy(alpha = 0.22f))
-            .clickable(enabled = !loading, onClick = onClick)
+            .desktopClickable(minTargetSize = 40.dp, hoverHighlight = true, enabled = !loading, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
     ) {
         if (loading) CircularProgressIndicator(color = palette.highlight, strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
@@ -777,7 +785,7 @@ fun InlineLyrics(
             .onGloballyPositioned { LyricsCardAnchor.coords = it }
             .clip(RoundedCornerShape(12.dp))
             .background(palette.background)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onExpand() }
+            .desktopClickable(minTargetSize = 48.dp) { onExpand() }
             .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -833,10 +841,10 @@ private fun CardIconButton(palette: LyricsPalette, description: String, icon: @C
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(32.dp)
+            .size(36.dp)
             .clip(CircleShape)
             .background(Color.Black.copy(alpha = 0.25f))
-            .clickable(onClick = onClick),
+            .desktopClickable(minTargetSize = 40.dp, hoverHighlight = true, shape = CircleShape, onClick = onClick),
     ) { icon() }
 }
 

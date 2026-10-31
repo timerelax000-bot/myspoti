@@ -230,6 +230,7 @@ fun SettingsScreen(navController: NavController) {
             LookRow()
             OrientationRow()
             LanguageRow()
+            TvDesktopModeSection()
             }
             if (tab == 3) {
             ExtensionSettingsRows(navController)
@@ -587,6 +588,180 @@ private fun AboutRow() {
             }
         }
     }
+}
+
+/** TV / Desktop Mode Settings Section */
+@Composable
+private fun TvDesktopModeSection() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Section(R.string.settings_section_display) // Reusing section style
+    Text(
+        text = "TV & DESKTOP MODE",
+        color = com.music.spotui.ui.theme.AppAccent,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.sp,
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
+    )
+
+    // Layout preset picker
+    val presets = listOf(
+        com.music.spotui.data.preferences.TvModePref.LAYOUT_BALANCED to "Balanced (Two-Panel)",
+        com.music.spotui.data.preferences.TvModePref.LAYOUT_CINEMA to "Cinema (Video focus)",
+        com.music.spotui.data.preferences.TvModePref.LAYOUT_LYRICS to "Lyrics (Sing-along)",
+        com.music.spotui.data.preferences.TvModePref.LAYOUT_MINIMAL to "Minimal (Artwork)",
+    )
+    var showPresetDialog by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showPresetDialog = true }
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+    ) {
+        Text("Default TV layout", color = AppText, fontSize = 16.sp)
+        val currentLabel = presets.firstOrNull { it.first == com.music.spotui.data.preferences.TvModePref.layoutPreset }?.second ?: "Balanced"
+        Text(currentLabel, color = AppMuted, fontSize = 12.sp)
+    }
+
+    if (showPresetDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showPresetDialog = false },
+            title = { Text("Default TV layout", color = AppText) },
+            text = {
+                Column {
+                    presets.forEach { (preset, label) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    com.music.spotui.data.preferences.TvModePref.setLayout(ctx, preset)
+                                    showPresetDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                        ) {
+                            Text(label, color = AppText, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                            if (com.music.spotui.data.preferences.TvModePref.layoutPreset == preset) {
+                                Icon(Icons.Default.Check, null, tint = com.music.spotui.ui.theme.AppAccent)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { showPresetDialog = false }) {
+                    Text(stringResource(android.R.string.ok), color = com.music.spotui.ui.theme.AppAccent)
+                }
+            },
+            containerColor = Color(0xFF1E1E22),
+        )
+    }
+
+    // Auto-hide controls timeout
+    val autoHideOptions = listOf(0 to "Never hide", 2 to "2 seconds", 5 to "5 seconds", 8 to "8 seconds")
+    var showAutoHideDialog by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showAutoHideDialog = true }
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+    ) {
+        Text("Auto-hide playback controls", color = AppText, fontSize = 16.sp)
+        val currentSec = com.music.spotui.data.preferences.TvModePref.autoHideSeconds
+        val currentLabel = autoHideOptions.firstOrNull { it.first == currentSec }?.second ?: "$currentSec seconds"
+        Text(currentLabel, color = AppMuted, fontSize = 12.sp)
+    }
+
+    if (showAutoHideDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showAutoHideDialog = false },
+            title = { Text("Auto-hide delay", color = AppText) },
+            text = {
+                Column {
+                    autoHideOptions.forEach { (sec, label) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    com.music.spotui.data.preferences.TvModePref.setAutoHide(ctx, sec)
+                                    showAutoHideDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                        ) {
+                            Text(label, color = AppText, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                            if (com.music.spotui.data.preferences.TvModePref.autoHideSeconds == sec) {
+                                Icon(Icons.Default.Check, null, tint = com.music.spotui.ui.theme.AppAccent)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { showAutoHideDialog = false }) {
+                    Text(stringResource(android.R.string.ok), color = com.music.spotui.ui.theme.AppAccent)
+                }
+            },
+            containerColor = Color(0xFF1E1E22),
+        )
+    }
+
+    // Ambient Mode Screensaver timeout
+    val ambientOptions = listOf(0 to "Never", 15 to "15 seconds", 30 to "30 seconds", 60 to "60 seconds")
+    var showAmbientDialog by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showAmbientDialog = true }
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+    ) {
+        Text("Ambient screensaver mode", color = AppText, fontSize = 16.sp)
+        val currentSec = com.music.spotui.data.preferences.TvModePref.ambientSeconds
+        val currentLabel = ambientOptions.firstOrNull { it.first == currentSec }?.second ?: "$currentSec seconds"
+        Text(currentLabel, color = AppMuted, fontSize = 12.sp)
+    }
+
+    if (showAmbientDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showAmbientDialog = false },
+            title = { Text("Ambient mode timeout", color = AppText) },
+            text = {
+                Column {
+                    ambientOptions.forEach { (sec, label) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    com.music.spotui.data.preferences.TvModePref.setAmbient(ctx, sec)
+                                    showAmbientDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                        ) {
+                            Text(label, color = AppText, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                            if (com.music.spotui.data.preferences.TvModePref.ambientSeconds == sec) {
+                                Icon(Icons.Default.Check, null, tint = com.music.spotui.ui.theme.AppAccent)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { showAmbientDialog = false }) {
+                    Text(stringResource(android.R.string.ok), color = com.music.spotui.ui.theme.AppAccent)
+                }
+            },
+            containerColor = Color(0xFF1E1E22),
+        )
+    }
+
+    // Up Next preview switch
+    OptionRow(
+        label = "Up Next preview card",
+        detail = "Show upcoming song card 12s before current track ends",
+        checked = com.music.spotui.data.preferences.TvModePref.upNextEnabled,
+        onChecked = { com.music.spotui.data.preferences.TvModePref.setUpNext(ctx, it) },
+    )
 }
 
 /**

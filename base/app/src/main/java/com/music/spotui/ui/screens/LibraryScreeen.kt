@@ -9,6 +9,8 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import com.music.spotui.ui.components.SearchClearButton
 import com.music.spotui.ui.components.pressable
+import com.music.spotui.ui.components.desktopClickable
+import com.music.spotui.ui.components.secondaryClick
 import androidx.compose.ui.res.stringResource
 
 import androidx.compose.foundation.background
@@ -513,6 +515,9 @@ fun SumUpLibraryScreen(
                         if (dragged) { scaleX = 1.03f; scaleY = 1.03f }
                     }
                     .background(if (dragged) tone(0xFF2A2A2A) else Color.Transparent, RoundedCornerShape(8.dp))
+                    .secondaryClick {
+                        if (entry.uri.isNotBlank() && !LibraryEdits.isPending(entry.spotifyId)) itemMenu = entry
+                    }
                     .pressable(0.96f, onPressHint = { prefetchLibraryEntry(entry) }) { openLibraryEntry(entry, navController) }
                     // Inside the clickable, so a long press that ends without moving opens nothing.
                     .then(if (!movable) Modifier else Modifier.pointerInput(key) {
@@ -542,8 +547,20 @@ fun SumUpLibraryScreen(
                         Text(text = entry.subtitle, color = AppMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                if (entry.uri.isNotBlank() && !LibraryEdits.isPending(entry.spotifyId)) Icon(Icons.Default.MoreVert, stringResource(R.string.content_description_context_menu),
-                    tint = AppMuted, modifier = Modifier.size(36.dp).clip(CircleShape).clickable { itemMenu = entry }.padding(6.dp))
+                if (entry.uri.isNotBlank() && !LibraryEdits.isPending(entry.spotifyId)) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        stringResource(R.string.content_description_context_menu),
+                        tint = AppMuted,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .desktopClickable(minTargetSize = 44.dp, hoverHighlight = true, shape = CircleShape) {
+                                itemMenu = entry
+                            }
+                            .padding(10.dp),
+                    )
+                }
             }
         }
         // ── Artists the user follows on Spotify ──

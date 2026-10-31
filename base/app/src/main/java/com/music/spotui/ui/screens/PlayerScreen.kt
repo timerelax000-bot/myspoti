@@ -152,6 +152,12 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalGlideComposeApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun PlayerScreen(navController: NavController) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+
     val playerViewModel : PlayerViewModel = viewModel()
     val songTitle = playerViewModel.currentSongTitle.value
     val songSinger = playerViewModel.currentSongSinger.value

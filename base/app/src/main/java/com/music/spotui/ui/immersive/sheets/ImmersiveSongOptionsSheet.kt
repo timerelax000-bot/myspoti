@@ -119,7 +119,7 @@ fun ImmersiveSongOptionsSheet(
         val videoOn = com.music.spotui.video.MusicVideoController.on.value
         val clipSound = com.music.spotui.video.MusicVideoController.clipSound.value
 
-        if (videoReady || videoOn) {
+        if (videoOn) {
             ImmersiveSheetRow(
                 icon = if (clipSound) androidx.compose.material.icons.Icons.Default.VolumeUp else androidx.compose.material.icons.Icons.Default.MusicNote,
                 label = stringResource(if (clipSound) R.string.clip_sound_clip else R.string.clip_sound_song),

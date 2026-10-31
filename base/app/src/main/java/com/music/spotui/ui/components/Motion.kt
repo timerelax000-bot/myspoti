@@ -34,9 +34,16 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+
 /**
  * Official-app press feedback: the control shrinks a little under the finger and
  * springs back on release, no ripple. Animates only while pressed.
+ * Also adds desktop hand pointer and subtle hover highlight.
  */
 fun Modifier.pressable(
     pressedScale: Float = 0.9f,
@@ -45,8 +52,20 @@ fun Modifier.pressable(
     onClick: () -> Unit,
 ): Modifier = composed {
     val source = remember { MutableInteractionSource() }
+    val isHovered by source.collectIsHoveredAsState()
     val hinted = if (onPressHint == null) Modifier else Modifier.pressHint(onPressHint)
-    hinted.then(pressScale(source, pressedScale)).clickable(source, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+    hinted
+        .pointerHoverIcon(if (enabled) PointerIcon.Hand else PointerIcon.Default)
+        .hoverable(source, enabled = enabled)
+        .then(
+            if (isHovered && enabled) {
+                Modifier.drawBehind {
+                    drawRect(color = Color.White.copy(alpha = 0.06f))
+                }
+            } else Modifier
+        )
+        .then(pressScale(source, pressedScale))
+        .clickable(source, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
 }
 
 /**

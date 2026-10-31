@@ -4,6 +4,7 @@ import com.music.spotui.ui.theme.AppDestructive
 import com.music.spotui.ui.theme.tone
 import com.music.spotui.ui.theme.AppText
 import com.music.spotui.ui.theme.AppMuted
+import com.music.spotui.ui.components.desktopClickable
 
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Home
@@ -140,7 +141,11 @@ fun NameDialog(title: String, initial: String, confirm: String, onDismiss: () ->
 private fun SheetRow(icon: ImageVector, label: String, detail: String? = null, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp).clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .desktopClickable(minTargetSize = 52.dp, hoverHighlight = true, onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 8.dp),
     ) {
         Icon(icon, null, tint = AppMuted, modifier = Modifier.size(26.dp))
         Spacer(Modifier.width(16.dp))
@@ -572,7 +577,10 @@ fun AddLocalToPlaylistSheet(track: LocalTrack, onDismiss: () -> Unit) {
 private fun PickRow(name: String, detail: String, cover: String?, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .desktopClickable(minTargetSize = 52.dp, hoverHighlight = true, onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 8.dp),
     ) {
         if (cover == null) Image(painterResource(R.drawable.local_files_cover), null, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)))
         else GlideImage(transition = CrossFade, model = cover, contentDescription = null, contentScale = ContentScale.Crop,

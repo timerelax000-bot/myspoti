@@ -208,6 +208,12 @@ fun ImmersivePlayer(
     modifier: Modifier = Modifier,
     navController: NavController? = null,
 ) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+
     val context = LocalContext.current
     val palette = rememberArtworkColors(state.coverUrl.takeIf { it.isNotBlank() })
     // A crossfade: the colours of the song going out, as they were when it began (the new cover's
@@ -298,8 +304,14 @@ fun ImmersivePlayer(
         val window = com.music.spotui.ui.components.windowSize()
         val landscape = maxWidth > maxHeight || window.twoPane
         val sidePane = window.large && maxWidth >= SIDE_PANE_MIN_WIDTH
+        // Widescreen / TV mode for Honor MagicOS Desktop Mode, DeX, and large resizable desktop windows.
+        // Requires desktop-grade dimensions (>= 960dp width, >= 480dp height) and landscape aspect ratio.
+        val isWidescreenTv = maxWidth >= WIDESCREEN_TV_MIN_WIDTH &&
+            maxHeight >= WIDESCREEN_TV_MIN_HEIGHT &&
+            maxWidth > maxHeight * 1.15f
+
         PlayerBackdrop(palette, outgoingPalette, blend, state.coverUrl)
-        if (canvasUrl != null && !videoOn) {
+        if (canvasUrl != null && !videoOn && !isWidescreenTv) {
             com.music.spotui.ui.screens.CanvasVideo(
                 url = canvasUrl,
                 onFirstFrame = { canvasShown = true },
@@ -321,7 +333,19 @@ fun ImmersivePlayer(
             )
         }
         CompositionLocalProvider(LocalPlayerTint provides tint) {
-            if (landscape) LandscapePlayer(
+            if (isWidescreenTv) {
+                WidescreenTvPlayer(
+                    state = state,
+                    actions = actions,
+                    tint = tint,
+                    canvasUrl = canvasUrl,
+                    pauseScale = pauseScale,
+                    volume = volume,
+                    onOpenDevices = { showDevices = true },
+                    onMore = if (navController != null && state.song != null) ({ showMenu = true }) else null,
+                    onSource = { showQuality = true },
+                )
+            } else if (landscape) LandscapePlayer(
                 state = state,
                 actions = actions,
                 tint = tint,
@@ -415,7 +439,8 @@ fun ImmersivePlayer(
                             Box(Modifier.fillMaxSize()) {
                                 com.music.spotui.ui.components.VideoSurface(
                                     modifier = Modifier.fillMaxSize(),
-                                    onTap = { com.music.spotui.video.MusicVideoController.fullscreen.value = true },
+                                    active = !videoFullscreen,
+                                    onTap = { },
                                 )
                                 com.music.spotui.ui.components.VideoFullscreenButton(
                                     Modifier.align(Alignment.BottomEnd).padding(4.dp),
@@ -439,31 +464,6 @@ fun ImmersivePlayer(
                                 requestBuilderTransform = { it.override(COVER_DECODE_PX) },
                             )
                             SongBlendCover(blend, Modifier.fillMaxSize()) { it.override(COVER_DECODE_PX) }
-                        }
-                    }
-
-                    // Video Switch Pill (Audio / Video & Clip Sound switcher) in portrait
-                    if ((videoReady || videoOn) && panel == Panel.NONE) {
-                        val pillIn by animateFloatAsState(
-                            targetValue = if (videoReady || videoOn) 1f else 0f,
-                            animationSpec = tween(250),
-                            label = "immersivePillIn",
-                        )
-                        if (pillIn > 0f) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .offset {
-                                        IntOffset(
-                                            left.roundToPx(),
-                                            (titleTop() - 38.dp).roundToPx(),
-                                        )
-                                    }
-                                    .graphicsLayer { alpha = pillIn },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                com.music.spotui.ui.components.VideoSwitchPill(on = videoOn)
-                            }
                         }
                     }
 
@@ -539,6 +539,9 @@ fun ImmersivePlayer(
             nowPlaying = true,
             onOpenQueue = { panel = Panel.QUEUE },
         )
+    }
+    if (showDevices) {
+        DevicesSheet { showDevices = false }
     }
 }
 
@@ -681,49 +684,24 @@ private fun RowScope.PlayerCredits(
                 ),
         )
     }
-    Spacer(Modifier.width(10.dp))
     val mv = com.music.spotui.video.MusicVideoController
     val videoState = mv.state.value
     val readyVideo = videoState as? com.music.spotui.video.MusicVideoController.State.Ready
+    val remote = com.music.spotui.di.SongPlayer.activeDevice.value != null
     val videoMatchesTrack = state.trackId.isNotBlank() && readyVideo?.trackId == state.trackId
-    val videoReady = videoMatchesTrack && com.music.spotui.data.preferences.MusicVideoPref.on
-    val videoSearching = videoState is com.music.spotui.video.MusicVideoController.State.Searching
-    val videoOn = mv.on.value && videoMatchesTrack && com.music.spotui.data.preferences.MusicVideoPref.on
+    val videoReady = videoMatchesTrack && !remote && !state.buffering && !com.music.spotui.data.DataSaver.active &&
+            com.music.spotui.data.preferences.MusicVideoPref.on
+    val videoOn = mv.on.value && videoMatchesTrack && !remote && com.music.spotui.data.preferences.MusicVideoPref.on
 
-    if (videoReady || videoOn || videoSearching) {
-        if (videoSearching) {
-            Box(
-                modifier = Modifier.size(34.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator(
-                    color = tint.copy(alpha = 0.7f),
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-        } else {
-            CircleGlyph(
-                icon = androidx.compose.material.icons.Icons.Default.OndemandVideo,
-                contentDescription = stringResource(if (videoOn) R.string.av_switch_to_audio else R.string.av_switch_to_video),
-                onClick = {
-                    if (!videoOn) {
-                        mv.setOn(true)
-                    }
-                    mv.fullscreen.value = true
-                },
-                active = videoOn,
-            )
-        }
-        Spacer(Modifier.width(8.dp))
+    if (videoReady || videoOn) {
+        Spacer(Modifier.width(10.dp))
+        CircleGlyph(
+            icon = androidx.compose.material.icons.Icons.Default.OndemandVideo,
+            contentDescription = stringResource(R.string.av_content_desc),
+            onClick = { mv.setOn(!videoOn) },
+            active = videoOn,
+        )
     }
-    // Beside the credits rather than in the toggle row: liking is about this song.
-    CircleGlyph(
-        icon = if (state.liked) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-        contentDescription = stringResource(if (state.liked) R.string.immersive_player_unlike else R.string.immersive_player_like),
-        onClick = actions.toggleLike,
-        active = state.liked,
-    )
     if (onMore != null) {
         Spacer(Modifier.width(8.dp))
         CircleGlyph(
@@ -805,6 +783,7 @@ private fun LandscapePlayer(
 ) {
     val videoState by remember { com.music.spotui.video.MusicVideoController.state }
     val videoOn by remember { com.music.spotui.video.MusicVideoController.on }
+    val videoFullscreen by remember { com.music.spotui.video.MusicVideoController.fullscreen }
     val videoReady = videoState is com.music.spotui.video.MusicVideoController.State.Ready
 
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
@@ -847,7 +826,8 @@ private fun LandscapePlayer(
                                     Box(Modifier.fillMaxSize()) {
                                         com.music.spotui.ui.components.VideoSurface(
                                             modifier = Modifier.fillMaxSize(),
-                                            onTap = { com.music.spotui.video.MusicVideoController.fullscreen.value = true },
+                                            active = !videoFullscreen,
+                                            onTap = { },
                                         )
                                         com.music.spotui.ui.components.VideoFullscreenButton(
                                             Modifier.align(Alignment.BottomEnd).padding(4.dp),
@@ -875,11 +855,6 @@ private fun LandscapePlayer(
                 // The volume bar is the first thing to go when the window is low: the hardware keys do it too.
                 val showVolume = maxHeight >= LANDSCAPE_VOLUME_MIN_HEIGHT
                 Column(Modifier.widthIn(max = PLAYER_MAX_WIDTH).verticalScroll(rememberScrollState())) {
-                    if (videoReady || videoOn) {
-                        Box(Modifier.fillMaxWidth().padding(bottom = 8.dp), contentAlignment = Alignment.Center) {
-                            com.music.spotui.ui.components.VideoSwitchPill(on = videoOn)
-                        }
-                    }
                     Row(Modifier.fillMaxWidth().height(HEADER_HEIGHT), verticalAlignment = Alignment.CenterVertically) {
                         PlayerCredits(state, actions, tint, scrolls = true, collapse = { 0f }, onMore = onMore, onSource = onSource)
                     }
@@ -909,3 +884,9 @@ private val SIDE_PANE_MIN_WIDTH = 1100.dp
 
 /** The right-hand column needs about this much height to show the volume bar as well. */
 private val LANDSCAPE_VOLUME_MIN_HEIGHT = 400.dp
+
+/** Minimum width to activate the premium TV / Widescreen two-panel layout. */
+private val WIDESCREEN_TV_MIN_WIDTH = 960.dp
+
+/** Minimum height to activate the premium TV / Widescreen two-panel layout (excludes compact phone landscape). */
+private val WIDESCREEN_TV_MIN_HEIGHT = 480.dp

@@ -110,51 +110,14 @@ private val OverMedia = Color.Black.copy(alpha = 0.6f)
 /** Spotify's "Passer à la vidéo" / "Passer à l'audio" pill. */
 @Composable
 fun VideoSwitchPill(on: Boolean, modifier: Modifier = Modifier) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = modifier) {
-        SwitchPill(on)
-        // With the video on: the clip's own sound instead of the song's (the song still plays, unheard).
-        if (on) {
-            val clip = MusicVideoController.clipSound.value
-            val context = androidx.compose.ui.platform.LocalContext.current
-            Spacer(Modifier.width(8.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .height(32.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(OverMedia)
-                    .clickable {
-                        MusicVideoController.setClipSound(!clip)
-                        // What changed, said once per tap: the label alone did not tell (reported).
-                        android.widget.Toast.makeText(context, if (clip) R.string.clip_sound_off_hint else R.string.clip_sound_on_hint, android.widget.Toast.LENGTH_LONG).show()
-                    }
-                    .padding(start = 10.dp, end = 12.dp),
-            ) {
-                Icon(
-                    Icons.Default.VolumeUp,
-                    contentDescription = null,
-                    tint = if (clip) com.music.spotui.ui.theme.AppAccent else Color.White,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                // The sound heard now: the song's, or the clip's own.
-                Text(stringResource(if (clip) R.string.clip_sound_clip else R.string.clip_sound_song), color = if (clip) com.music.spotui.ui.theme.AppAccent else Color.White,
-                    fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            }
-        }
-    }
-}
-
-@Composable
-private fun SwitchPill(on: Boolean) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
+        modifier = modifier
             .height(32.dp)
             .clip(RoundedCornerShape(50))
             .background(OverMedia)
             .clickable { MusicVideoController.setOn(!on) }
-            .padding(start = 10.dp, end = 12.dp),
+            .padding(horizontal = 12.dp),
     ) {
         Icon(
             if (on) Icons.Default.MusicNote else Icons.Default.OndemandVideo,
@@ -168,7 +131,31 @@ private fun SwitchPill(on: Boolean) {
             color = Color.White,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
-            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+fun ClipAudioSelectorButton(modifier: Modifier = Modifier) {
+    val clip = MusicVideoController.clipSound.value
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(OverMedia)
+            .clickable {
+                MusicVideoController.setClipSound(!clip)
+                android.widget.Toast.makeText(context, if (clip) R.string.clip_sound_off_hint else R.string.clip_sound_on_hint, android.widget.Toast.LENGTH_LONG).show()
+            },
+    ) {
+        Icon(
+            if (clip) Icons.Default.VolumeUp else Icons.Default.MusicNote,
+            contentDescription = stringResource(if (clip) R.string.clip_sound_clip else R.string.clip_sound_song),
+            tint = if (clip) com.music.spotui.ui.theme.AppAccent else Color.White,
+            modifier = Modifier.size(18.dp),
         )
     }
 }
@@ -199,6 +186,11 @@ fun VideoFullscreenButton(modifier: Modifier = Modifier) {
 /** Controls over the full-screen video; a tap shows / hides them. */
 @Composable
 fun VideoFullscreenOverlay() {
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(Unit) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
     BackHandler { MusicVideoController.fullscreen.value = false }
     var controls by remember { mutableStateOf(true) }
     var touch by remember { mutableIntStateOf(0) }

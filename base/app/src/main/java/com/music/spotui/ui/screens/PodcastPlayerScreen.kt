@@ -130,6 +130,12 @@ private fun PodcastProgress(playing: Boolean, uri: String, duration: Long) {
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 fun PodcastPlayerScreen(navController: NavController) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+
     val context = LocalContext.current
     val state = Graph.currentSongState
     val np by SongPlayer.nowPlaying
