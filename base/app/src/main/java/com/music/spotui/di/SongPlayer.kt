@@ -1274,8 +1274,14 @@ object SongPlayer {
             com.music.spotui.data.api.LyricsApi.prefetch(lyricsTrack(song))
     }
 
+    @Volatile private var lastPlayTapAt = 0L
+    @Volatile private var lastPauseTapAt = 0L
+
     /** [by]: who asked, for the diagnostic (the app's screens, the media session, an extension...). */
     fun play(by: String = "user") {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastPlayTapAt < 180L) return
+        lastPlayTapAt = now
         app.myspoti.host.android.Logbook.log("play asked by $by")
         if (routing) return // the song asked for starts by itself
         if (LocalPlayer.active.value) { Haptics.click(); LocalPlayer.resume(); return }
@@ -1309,6 +1315,9 @@ object SongPlayer {
     }
 
     fun pause(by: String = "user") {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastPauseTapAt < 180L) return
+        lastPauseTapAt = now
         app.myspoti.host.android.Logbook.log("pause asked by $by")
         Haptics.click(); cancelBurst(); pauseSilently()
     }

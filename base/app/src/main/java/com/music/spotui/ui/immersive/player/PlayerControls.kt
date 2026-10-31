@@ -25,6 +25,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -188,7 +189,7 @@ internal fun CircleGlyph(
     )
     Box(
         modifier = Modifier
-            .size(34.dp)
+            .size(44.dp)
             .clip(CircleShape)
             .background(LocalPlayerTint.current.copy(alpha = discAlpha))
             .clickable(
@@ -209,7 +210,7 @@ internal fun CircleGlyph(
                 imageVector = glyph,
                 contentDescription = contentDescription,
                 tint = LocalPlayerTint.current,
-                modifier = Modifier.size(19.dp),
+                modifier = Modifier.size(20.dp),
             )
         }
     }
@@ -288,11 +289,28 @@ private fun TransportGlyph(
     onClick: () -> Unit,
     heightScale: Float = 1f,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val reduceMotion = com.music.spotui.ui.look.rememberReduceMotion()
+
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed && !reduceMotion) 0.90f else 1f,
+        animationSpec = spring(
+            dampingRatio = 0.8f,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "transportGlyphScale",
+    )
+
     Box(
         modifier = Modifier
             .size(touchSize)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = interactionSource,
                 indication = null,
             ) {
                 Haptics.click()
@@ -300,19 +318,25 @@ private fun TransportGlyph(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = Color.White,
-            modifier = Modifier
-                .size(size)
-                .then(if (heightScale != 1f) Modifier.graphicsLayer { scaleY = heightScale } else Modifier),
-        )
+        Crossfade(
+            targetState = icon,
+            animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+            label = "transportGlyphCrossfade",
+        ) { targetIcon ->
+            Icon(
+                imageVector = targetIcon,
+                contentDescription = contentDescription,
+                tint = Color.White,
+                modifier = Modifier
+                    .size(size)
+                    .then(if (heightScale != 1f) Modifier.graphicsLayer { scaleY = heightScale } else Modifier),
+            )
+        }
     }
 }
 
 /** ThinSlider's fixed touch target at the volume bar's size: 10dp + 22dp. */
-internal val VOLUME_ROW_HEIGHT = 32.dp
+internal val VOLUME_ROW_HEIGHT = 36.dp
 
 /** The volume bar between its two speaker glyphs. */
 @Composable
@@ -321,13 +345,26 @@ internal fun VolumeRow(volume: PlayerVolume) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.AutoMirrored.Rounded.VolumeDown,
-            contentDescription = stringResource(R.string.immersive_player_volume_down),
-            tint = LocalPlayerTint.current.copy(alpha = 0.5f),
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.width(10.dp))
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    volume.drag((volume.level.value - 0.1f).coerceAtLeast(0f))
+                    volume.release()
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Rounded.VolumeDown,
+                contentDescription = stringResource(R.string.immersive_player_volume_down),
+                tint = LocalPlayerTint.current.copy(alpha = 0.5f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Spacer(Modifier.width(6.dp))
         ThinSlider(
             value = volume.level.value,
             onValueChange = volume::drag,
@@ -336,19 +373,32 @@ internal fun VolumeRow(volume: PlayerVolume) {
             activeHeight = 10.dp,
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(10.dp))
-        Icon(
-            Icons.AutoMirrored.Rounded.VolumeUp,
-            contentDescription = stringResource(R.string.immersive_player_volume_up),
-            tint = LocalPlayerTint.current.copy(alpha = 0.5f),
-            modifier = Modifier.size(20.dp),
-        )
+        Spacer(Modifier.width(6.dp))
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    volume.drag((volume.level.value + 0.1f).coerceAtMost(1f))
+                    volume.release()
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Rounded.VolumeUp,
+                contentDescription = stringResource(R.string.immersive_player_volume_up),
+                tint = LocalPlayerTint.current.copy(alpha = 0.5f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 
-private val BOTTOM_ACTION_SIZE = 44.dp
+private val BOTTOM_ACTION_SIZE = 48.dp
 // Three segments (shuffle, repeat, devices) have to fit between the glyphs on a 320dp screen.
-private val PILL_SEGMENT_WIDTH = 56.dp
+private val PILL_SEGMENT_WIDTH = 58.dp
 private val PILL_ICON_SIZE = 24.dp
 
 /** How long the capsule takes to cross from the middle of the row to the lyrics glyph's place as the queue opens, and back. */

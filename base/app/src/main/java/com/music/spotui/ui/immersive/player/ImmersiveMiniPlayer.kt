@@ -10,6 +10,7 @@
  */
 package com.music.spotui.ui.immersive.player
 
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -66,10 +67,11 @@ import com.music.spotui.ui.navigation.PlayerSheet
 import com.music.spotui.ui.viewmodel.PlayerViewModel
 import kotlin.math.abs
 
-private val GLYPH_SLOT = 40.dp
-private val GLYPH_SIZE = 32.dp
-private val ART_CORNER = 8.dp
-private val MINI_HEIGHT = 56.dp
+private val GLYPH_SLOT = 48.dp
+private val GLYPH_SIZE = 30.dp
+private val ART_SIZE = 44.dp
+private val ART_CORNER = 10.dp
+private val MINI_HEIGHT = 60.dp
 
 /** How far the capsule is swiped along to change track. */
 private val TRACK_SWIPE_THRESHOLD = 72.dp
@@ -107,10 +109,10 @@ fun ImmersiveMiniPlayer(navController: NavController, modifier: Modifier = Modif
             .immersiveGlassSurface(shape, interactionSource = capsuleSource)
             .clip(shape)
             .clickable(interactionSource = capsuleSource, indication = null) { PlayerSheet.show() }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(ART_CORNER)).background(Color.Black.copy(alpha = 0.18f))) {
+        Box(Modifier.size(ART_SIZE).clip(RoundedCornerShape(ART_CORNER)).background(Color.Black.copy(alpha = 0.18f))) {
             GlideImage(
                 model = cover.takeIf { it.isNotBlank() },
                 contentDescription = null,
@@ -118,10 +120,10 @@ fun ImmersiveMiniPlayer(navController: NavController, modifier: Modifier = Modif
                 transition = CrossFade,
                 loading = placeholder(R.drawable.placeholder),
                 failure = placeholder(R.drawable.placeholder),
-                modifier = Modifier.size(40.dp),
+                modifier = Modifier.size(ART_SIZE),
             )
             // The outgoing cover dissolving into this one.
-            com.music.spotui.ui.components.SongBlendCover(blend, Modifier.size(40.dp))
+            com.music.spotui.ui.components.SongBlendCover(blend, Modifier.size(ART_SIZE))
         }
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f).graphicsLayer { alpha = blend?.wordsAlpha() ?: 1f }) {
@@ -131,9 +133,15 @@ fun ImmersiveMiniPlayer(navController: NavController, modifier: Modifier = Modif
                 style = Immersive.BodyStrong.copy(fontSize = 15.sp, lineHeight = 19.sp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
             )
             if (!adPlaying) {
-                Text(text = singer, style = Immersive.Subhead.copy(lineHeight = 16.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text = singer,
+                    style = Immersive.Subhead.copy(fontSize = 13.sp, lineHeight = 16.sp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
         if (buffering) {

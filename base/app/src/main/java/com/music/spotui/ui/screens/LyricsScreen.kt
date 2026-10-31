@@ -15,6 +15,9 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -274,16 +277,47 @@ private fun LyricLineText(
     onHold: (() -> Unit)? = null,
 ) {
     val target = when (state) {
-        1 -> palette.text
+        -1 -> palette.text.copy(alpha = 0.48f)
+        0 -> palette.highlight
+        1 -> palette.text.copy(alpha = 0.72f)
         else -> palette.highlight
     }
-    val color by animateColorAsState(target, tween(220), label = "lyricColor")
+    val color by animateColorAsState(
+        targetValue = target,
+        animationSpec = tween(240, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "lyricColor",
+    )
+    val lineAlpha by animateFloatAsState(
+        targetValue = when (state) {
+            -1 -> 0.48f
+            0 -> 1f
+            1 -> 0.72f
+            else -> 0.95f
+        },
+        animationSpec = tween(240, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+        label = "lyricAlpha",
+    )
+    val reduceMotion = com.music.spotui.ui.look.rememberReduceMotion()
+    val scale by animateFloatAsState(
+        targetValue = if (state == 0 && !reduceMotion) 1.02f else 1f,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = 0.8f,
+            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow,
+        ),
+        label = "lyricScale",
+    )
     // Explained by Genius: a light dotted line under each row of the text.
     var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
     var pressAt by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val swept = remember(line) { line.toSwept() }
     val lineModifier = modifier
         .fillMaxWidth()
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            alpha = lineAlpha
+            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
+        }
         .then(
             if (onTap != null || onHold != null) Modifier.secondaryClick(onHold)
                 .lastPress { at, _ -> pressAt = at }

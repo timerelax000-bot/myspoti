@@ -12,10 +12,12 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,7 +30,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -180,43 +186,40 @@ internal fun WidescreenTvPlayer(
     }
 
     // Inactivity Tracking for Auto-Hide and Ambient Mode
-    val lastInteractionTimestamp = remember { java.util.concurrent.atomic.AtomicLong(SystemClock.elapsedRealtime()) }
     var controlsVisible by remember { mutableStateOf(true) }
+    var interactionKey by remember { mutableLongStateOf(0L) }
     var isAmbientActive by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
+    var lastPointerPosition by remember { mutableStateOf<Offset?>(null) }
 
     fun registerInteraction() {
-        lastInteractionTimestamp.set(SystemClock.elapsedRealtime())
+        interactionKey++
         if (!controlsVisible) controlsVisible = true
         if (isAmbientActive) isAmbientActive = false
     }
 
-    // Auto-hide & Ambient timer coroutine
-    LaunchedEffect(state.playing, volume.dragging, menuOpen) {
-        while (true) {
-            delay(500)
-            val now = SystemClock.elapsedRealtime()
-            val idleMs = now - lastInteractionTimestamp.get()
-            val autoHideSec = TvModePref.autoHideSeconds
+    // Auto-hide & Ambient countdown logic (Single authoritative source of truth)
+    LaunchedEffect(interactionKey, controlsVisible, volume.dragging, menuOpen, state.playing) {
+        if (!controlsVisible) {
+            // Controls are hidden and remain hidden.
+            // Check for ambient screensaver transition if playing and not interacting
             val ambientSec = TvModePref.ambientSeconds
-
-            // Auto-hide controls check
-            if (!volume.dragging && !menuOpen && autoHideSec > 0) {
-                if (idleMs >= autoHideSec * 1000L) {
-                    if (controlsVisible) controlsVisible = false
+            if (state.playing && ambientSec > 0 && !isAmbientActive) {
+                val autoHideSec = TvModePref.autoHideSeconds
+                val remainingAmbientSec = (ambientSec - autoHideSec).coerceAtLeast(1)
+                delay(remainingAmbientSec * 1000L)
+                if (!volume.dragging && !menuOpen && state.playing) {
+                    isAmbientActive = true
                 }
-            } else {
-                if (!controlsVisible) controlsVisible = true
             }
+            return@LaunchedEffect
+        }
 
-            // Ambient mode check (only when playing and not dragging/menu open)
-            if (state.playing && !volume.dragging && !menuOpen && ambientSec > 0) {
-                if (idleMs >= ambientSec * 1000L) {
-                    if (!isAmbientActive) isAmbientActive = true
-                }
-            } else if (!state.playing) {
-                if (isAmbientActive) isAmbientActive = false
-            }
+        // Controls are visible: countdown to auto-hide
+        val autoHideSec = TvModePref.autoHideSeconds
+        if (autoHideSec > 0 && !volume.dragging && !menuOpen) {
+            delay(autoHideSec * 1000L)
+            controlsVisible = false
         }
     }
 
@@ -231,11 +234,41 @@ internal fun WidescreenTvPlayer(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .onPreviewKeyEvent {
+                registerInteraction()
+                false
+            }
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
-                        registerInteraction()
+                        when (event.type) {
+                            PointerEventType.Press, PointerEventType.Release -> {
+                                registerInteraction()
+                            }
+                            PointerEventType.Scroll -> {
+                                registerInteraction()
+                            }
+                            PointerEventType.Move -> {
+                                val currentPos = event.changes.firstOrNull()?.position
+                                if (currentPos != null) {
+                                    val prev = lastPointerPosition
+                                    if (prev == null) {
+                                        lastPointerPosition = currentPos
+                                    } else {
+                                        val dist = (currentPos - prev).getDistance()
+                                        // Ignore subpixel jitter or layout changes: only genuine physical movement > 4px
+                                        if (dist > 4f) {
+                                            lastPointerPosition = currentPos
+                                            registerInteraction()
+                                        }
+                                    }
+                                }
+                            }
+                            else -> {
+                                // Ignore Enter, Exit, Unknown events caused by layout shifts or animations!
+                            }
+                        }
                     }
                 }
             },
@@ -253,41 +286,21 @@ internal fun WidescreenTvPlayer(
                 onWake = { registerInteraction() },
             )
         } else {
-            // ── REGULAR TV PLAYER MODES ──
-            Column(
+            // ── REGULAR TV PLAYER MODES (STABLE OVERLAY LAYOUT) ──
+            // Layer 1: Main Presets Container (Constant dimension, zero jitter on auto-hide)
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
-                    .navigationBarsPadding(),
+                    .navigationBarsPadding()
+                    .padding(top = 56.dp, bottom = 96.dp),
             ) {
-                // Top Bar (Animated Visibility for Auto-Hide)
-                AnimatedVisibility(
-                    visible = controlsVisible,
-                    enter = fadeIn(tween(260)) + slideInVertically(tween(260)) { -it },
-                    exit = fadeOut(tween(260)) + slideOutVertically(tween(260)) { -it },
-                ) {
-                    WidescreenTopBar(
-                        state = state,
-                        tint = tint,
-                        currentPreset = currentPreset,
-                        onSelectPreset = ::selectPreset,
-                        videoReady = videoReady,
-                        videoOn = videoOn,
-                        onToggleVideo = { mv.setOn(!videoOn) },
-                        onMore = onMore,
-                        onSource = onSource,
-                        onClose = actions.close,
-                        onMenuStateChange = { menuOpen = it },
-                    )
-                }
-
-                // Main Presets Container
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                ) {
-                    when (currentPreset) {
+                Crossfade(
+                    targetState = currentPreset,
+                    animationSpec = tween(280, easing = FastOutSlowInEasing),
+                    label = "tvPresetCrossfade",
+                ) { preset ->
+                    when (preset) {
                         TvModePref.LAYOUT_CINEMA -> {
                             CinemaPreset(
                                 state = state,
@@ -336,45 +349,148 @@ internal fun WidescreenTvPlayer(
                             )
                         }
                     }
-
-                    // Up Next preview card (isolated 1-fps tick to prevent whole-player recomposition)
-                    UpNextPreviewHost(
-                        state = state,
-                        tint = tint,
-                        controlsVisible = controlsVisible,
-                        onOpenQueue = {
-                            rightTab = WidescreenRightTab.QUEUE
-                            registerInteraction()
-                        },
-                        modifier = Modifier.align(Alignment.BottomEnd),
-                    )
                 }
 
-                // Bottom Playback Control Bar (Animated Visibility for Auto-Hide)
-                AnimatedVisibility(
-                    visible = controlsVisible,
-                    enter = fadeIn(tween(280)) + slideInVertically(tween(280)) { it },
-                    exit = fadeOut(tween(280)) + slideOutVertically(tween(280)) { it },
-                ) {
-                    WidescreenBottomBar(
-                        state = state,
-                        actions = actions,
-                        tint = tint,
-                        volume = volume,
-                        rightTab = rightTab,
-                        onToggleLyrics = {
-                            rightTab = if (rightTab == WidescreenRightTab.LYRICS) WidescreenRightTab.QUEUE else WidescreenRightTab.LYRICS
-                        },
-                        onToggleQueue = {
-                            rightTab = if (rightTab == WidescreenRightTab.QUEUE) WidescreenRightTab.LYRICS else WidescreenRightTab.QUEUE
-                        },
-                        onOpenDevices = onOpenDevices,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 28.dp, vertical = 8.dp),
-                    )
-                }
+                // Up Next preview card (isolated 1-fps tick to prevent whole-player recomposition)
+                UpNextPreviewHost(
+                    state = state,
+                    tint = tint,
+                    controlsVisible = controlsVisible,
+                    onOpenQueue = {
+                        rightTab = WidescreenRightTab.QUEUE
+                        registerInteraction()
+                    },
+                    modifier = Modifier.align(Alignment.BottomEnd),
+                )
             }
+
+            // Layer 2: Top Bar (Animated Visibility Overlay for Auto-Hide)
+            AnimatedVisibility(
+                visible = controlsVisible,
+                enter = fadeIn(tween(240, easing = FastOutSlowInEasing)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { -it },
+                exit = fadeOut(tween(200, easing = FastOutSlowInEasing)) + slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { -it },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .statusBarsPadding(),
+            ) {
+                WidescreenTopBar(
+                    state = state,
+                    tint = tint,
+                    currentPreset = currentPreset,
+                    onSelectPreset = ::selectPreset,
+                    videoReady = videoReady,
+                    videoOn = videoOn,
+                    onToggleVideo = { mv.setOn(!videoOn) },
+                    onMore = onMore,
+                    onSource = onSource,
+                    onClose = actions.close,
+                    onMenuStateChange = { menuOpen = it },
+                )
+            }
+
+            // Layer 3: Bottom Playback Control Bar (Animated Visibility Overlay for Auto-Hide)
+            AnimatedVisibility(
+                visible = controlsVisible,
+                enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) + slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it },
+                exit = fadeOut(tween(220, easing = FastOutSlowInEasing)) + slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
+            ) {
+                WidescreenBottomBar(
+                    state = state,
+                    actions = actions,
+                    tint = tint,
+                    volume = volume,
+                    rightTab = rightTab,
+                    onToggleLyrics = {
+                        rightTab = if (rightTab == WidescreenRightTab.LYRICS) WidescreenRightTab.QUEUE else WidescreenRightTab.LYRICS
+                    },
+                    onToggleQueue = {
+                        rightTab = if (rightTab == WidescreenRightTab.QUEUE) WidescreenRightTab.LYRICS else WidescreenRightTab.QUEUE
+                    },
+                    onOpenDevices = onOpenDevices,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 28.dp, vertical = 10.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Focus- and hover-responsive glyph button for TV/Desktop top bar & actions.
+ * Enforces minimum 48dp hit targets, clear focus indication, and press feedback.
+ */
+@Composable
+private fun TvCircleGlyph(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    active: Boolean = false,
+    size: Dp = 48.dp,
+    iconSize: Dp = 22.dp,
+    tint: Color = LocalPlayerTint.current,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val reduceMotion = rememberReduceMotion()
+
+    val scale by animateFloatAsState(
+        targetValue = when {
+            reduceMotion -> 1f
+            isPressed -> 0.90f
+            isHovered || isFocused -> 1.06f
+            else -> 1f
+        },
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
+        label = "tvGlyphScale",
+    )
+
+    val baseAlpha = if (active) 0.32f else 0.14f
+    val bgAlpha = when {
+        isFocused -> 0.38f
+        isHovered -> 0.24f
+        else -> baseAlpha
+    }
+    val animatedBgAlpha by animateFloatAsState(bgAlpha, tween(160), label = "tvGlyphBg")
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .background(tint.copy(alpha = animatedBgAlpha))
+            .then(
+                if (isFocused) Modifier.border(2.dp, tint.copy(alpha = 0.65f), CircleShape) else Modifier
+            )
+            .desktopClickable(minTargetSize = size, shape = CircleShape) {
+                Haptics.click()
+                onClick()
+            }
+            .semantics { this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
+    ) {
+        Crossfade(
+            targetState = icon,
+            animationSpec = tween(160, easing = FastOutSlowInEasing),
+            label = "tvGlyphIconCrossfade",
+        ) { targetIcon ->
+            Icon(
+                imageVector = targetIcon,
+                contentDescription = null,
+                tint = if (active) tint else Color.White,
+                modifier = Modifier.size(iconSize),
+            )
         }
     }
 }
@@ -399,8 +515,8 @@ private fun WidescreenTopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp)
-            .padding(horizontal = 28.dp),
+            .height(56.dp)
+            .padding(horizontal = 32.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Context / Playing from
@@ -417,32 +533,32 @@ private fun WidescreenTopBar(
                     style = Immersive.Caption.copy(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
+                        letterSpacing = 1.2.sp,
                     ),
                     color = tint.copy(alpha = 0.45f),
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
             }
             Text(
                 text = contextName,
-                style = Immersive.Caption.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-                color = tint.copy(alpha = 0.85f),
+                style = Immersive.Caption.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                color = tint.copy(alpha = 0.90f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
 
-        // Layout Preset Selector Button
+        // Layout Preset Selector Button (Minimum 48dp hit target, clear focus & hover)
         Box {
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(tint.copy(alpha = 0.12f))
-                    .desktopClickable(minTargetSize = 38.dp, hoverHighlight = true) {
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(tint.copy(alpha = 0.14f))
+                    .desktopClickable(minTargetSize = 48.dp, hoverHighlight = true, shape = RoundedCornerShape(10.dp)) {
                         showPresetMenu = true
                         onMenuStateChange(true)
                     }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
@@ -454,9 +570,9 @@ private fun WidescreenTopBar(
                     },
                     contentDescription = null,
                     tint = tint,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(18.dp),
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
                     text = when (currentPreset) {
                         TvModePref.LAYOUT_CINEMA -> "CINEMA"
@@ -464,7 +580,7 @@ private fun WidescreenTopBar(
                         TvModePref.LAYOUT_MINIMAL -> "MINIMAL"
                         else -> "BALANCED"
                     },
-                    style = Immersive.Caption.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp),
+                    style = Immersive.Caption.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
                     color = tint,
                 )
             }
@@ -475,7 +591,9 @@ private fun WidescreenTopBar(
                     showPresetMenu = false
                     onMenuStateChange(false)
                 },
-                modifier = Modifier.background(Color(0xFF1E1E22)),
+                modifier = Modifier
+                    .background(Color(0xFF1A1A1E))
+                    .border(1.dp, tint.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
             ) {
                 DropdownMenuItem(
                     text = { Text("Balanced Mode (Two-panel)", color = Color.White) },
@@ -516,54 +634,57 @@ private fun WidescreenTopBar(
             }
         }
 
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(12.dp))
 
         // Sound source quality badge
         val sourceLabel = com.music.spotui.ui.components.playingSourceLabel()
         if (sourceLabel.isNotBlank() && !state.adPlaying) {
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(tint.copy(alpha = 0.12f))
-                    .desktopClickable(minTargetSize = 36.dp, hoverHighlight = true, onClick = onSource)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(tint.copy(alpha = 0.14f))
+                    .desktopClickable(minTargetSize = 48.dp, hoverHighlight = true, shape = RoundedCornerShape(8.dp), onClick = onSource)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = sourceLabel,
                     style = Immersive.Caption.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                    color = tint.copy(alpha = 0.8f),
+                    color = tint.copy(alpha = 0.85f),
                 )
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(12.dp))
         }
 
         // Music Video toggle button
         if (videoReady || videoOn) {
-            CircleGlyph(
+            TvCircleGlyph(
                 icon = Icons.Default.OndemandVideo,
                 contentDescription = stringResource(R.string.av_content_desc),
                 onClick = onToggleVideo,
                 active = videoOn,
+                size = 48.dp,
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(10.dp))
         }
 
         // More options menu
         if (onMore != null) {
-            CircleGlyph(
+            TvCircleGlyph(
                 icon = Icons.Rounded.MoreHoriz,
                 contentDescription = stringResource(R.string.immersive_player_more),
                 onClick = onMore,
+                size = 48.dp,
             )
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(10.dp))
         }
 
         // Desktop close button
-        CircleGlyph(
+        TvCircleGlyph(
             icon = Icons.Filled.Close,
             contentDescription = stringResource(R.string.immersive_player_close),
             onClick = onClose,
+            size = 48.dp,
         )
     }
 }
@@ -587,8 +708,8 @@ private fun BalancedPreset(
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 28.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(28.dp),
+            .padding(horizontal = 32.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(32.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         WidescreenCinematicPanel(
@@ -633,7 +754,7 @@ private fun CinemaPreset(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 40.dp, vertical = 12.dp),
+            .padding(horizontal = 48.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         WidescreenCinematicPanel(
@@ -668,46 +789,51 @@ private fun LyricsPreset(
     Row(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(24.dp),
+            .padding(horizontal = 36.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(32.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Floating compact cover & track identity on the left
         Column(
             modifier = Modifier
-                .weight(0.6f)
+                .weight(0.55f)
                 .fillMaxHeight(),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
                 modifier = Modifier
-                    .size(240.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .shadow(16.dp, RoundedCornerShape(16.dp))
-                    .background(Color.Black.copy(alpha = 0.3f)),
+                    .size(250.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .shadow(20.dp, RoundedCornerShape(18.dp))
+                    .background(Color.Black.copy(alpha = 0.35f))
+                    .border(1.dp, tint.copy(alpha = 0.15f), RoundedCornerShape(18.dp)),
             ) {
                 GlideImage(
                     model = state.coverUrl.takeIf { it.isNotBlank() },
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
+                    transition = CrossFade,
+                    loading = placeholder(R.drawable.placeholder),
+                    failure = placeholder(R.drawable.placeholder),
                     modifier = Modifier.fillMaxSize(),
                     requestBuilderTransform = { it.override(COVER_DECODE_PX) },
                 )
             }
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(20.dp))
             Text(
                 text = state.title,
-                style = Immersive.Title.copy(fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                style = Immersive.Title.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold),
                 color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = state.artist,
                 style = Immersive.Caption.copy(fontSize = 16.sp),
-                color = tint.copy(alpha = 0.7f),
+                color = tint.copy(alpha = 0.75f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -716,15 +842,15 @@ private fun LyricsPreset(
         // Full-height expansive live lyrics view
         Box(
             modifier = Modifier
-                .weight(1.4f)
+                .weight(1.45f)
                 .fillMaxHeight()
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color.Black.copy(alpha = 0.28f))
-                .border(1.dp, tint.copy(alpha = 0.10f), RoundedCornerShape(20.dp)),
+                .clip(RoundedCornerShape(22.dp))
+                .background(Color.Black.copy(alpha = 0.32f))
+                .border(1.dp, tint.copy(alpha = 0.12f), RoundedCornerShape(22.dp)),
         ) {
             ImmersiveLyricsPanel(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                contentPadding = PaddingValues(horizontal = 28.dp, vertical = 20.dp),
             )
         }
     }
@@ -744,7 +870,7 @@ private fun MinimalPreset(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp),
+            .padding(horizontal = 36.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -753,26 +879,29 @@ private fun MinimalPreset(
         ) {
             Box(
                 modifier = Modifier
-                    .size(320.dp)
+                    .size(340.dp)
                     .graphicsLayer {
                         scaleX = pauseScale.value
                         scaleY = pauseScale.value
                     }
-                    .shadow(24.dp, RoundedCornerShape(20.dp))
-                    .clip(RoundedCornerShape(20.dp))
+                    .shadow(28.dp, RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(24.dp))
                     .background(Color.Black.copy(alpha = 0.35f))
-                    .border(1.dp, tint.copy(alpha = 0.15f), RoundedCornerShape(20.dp)),
+                    .border(1.2.dp, tint.copy(alpha = 0.18f), RoundedCornerShape(24.dp)),
             ) {
                 GlideImage(
                     model = state.coverUrl.takeIf { it.isNotBlank() },
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
+                    transition = CrossFade,
+                    loading = placeholder(R.drawable.placeholder),
+                    failure = placeholder(R.drawable.placeholder),
                     modifier = Modifier.fillMaxSize(),
                     requestBuilderTransform = { it.override(COVER_DECODE_PX) },
                 )
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(26.dp))
 
             Text(
                 text = state.title,
@@ -780,12 +909,13 @@ private fun MinimalPreset(
                 color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
             )
             Spacer(Modifier.height(6.dp))
             Text(
                 text = state.artist,
                 style = Immersive.Caption.copy(fontSize = 18.sp),
-                color = tint.copy(alpha = 0.7f),
+                color = tint.copy(alpha = 0.75f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -929,10 +1059,10 @@ private fun UpNextPreviewHost(
 
     androidx.compose.animation.AnimatedVisibility(
         visible = showUpNext,
-        enter = fadeIn(tween(350)) + slideInVertically(tween(350)) { it / 2 },
-        exit = fadeOut(tween(280)) + slideOutVertically(tween(280)) { it / 2 },
+        enter = fadeIn(tween(300, easing = FastOutSlowInEasing)) + slideInVertically(tween(300, easing = FastOutSlowInEasing)) { it / 2 },
+        exit = fadeOut(tween(240, easing = FastOutSlowInEasing)) + slideOutVertically(tween(240, easing = FastOutSlowInEasing)) { it / 2 },
         modifier = modifier
-            .padding(end = 36.dp, bottom = if (controlsVisible) 110.dp else 24.dp),
+            .padding(end = 36.dp, bottom = if (controlsVisible) 124.dp else 28.dp),
     ) {
         nextTrack?.let { track ->
             UpNextCard(
@@ -947,6 +1077,7 @@ private fun UpNextPreviewHost(
 
 /**
  * Up Next Preview Card: Glassmorphic popup in bottom right.
+ * Sized 30-40% larger for TV distance readability.
  */
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
@@ -958,47 +1089,55 @@ private fun UpNextCard(
 ) {
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFF18181C).copy(alpha = 0.90f))
-            .border(1.dp, tint.copy(alpha = 0.20f), RoundedCornerShape(14.dp))
-            .shadow(16.dp, RoundedCornerShape(14.dp))
-            .desktopClickable(minTargetSize = 44.dp, hoverHighlight = true, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF141418).copy(alpha = 0.94f))
+            .border(1.5.dp, tint.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+            .shadow(20.dp, RoundedCornerShape(16.dp))
+            .desktopClickable(minTargetSize = 56.dp, hoverHighlight = true, shape = RoundedCornerShape(16.dp), onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(44.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color.Black.copy(alpha = 0.2f)),
+                .size(60.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.Black.copy(alpha = 0.3f)),
         ) {
             GlideImage(
                 model = song.coverUri.takeIf { it.isNotBlank() },
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                transition = CrossFade,
+                loading = placeholder(R.drawable.placeholder),
+                failure = placeholder(R.drawable.placeholder),
                 modifier = Modifier.fillMaxSize(),
-                requestBuilderTransform = { it.override(120) },
+                requestBuilderTransform = { it.override(200) },
             )
         }
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.widthIn(max = 200.dp)) {
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.widthIn(min = 180.dp, max = 280.dp)) {
             Text(
                 text = "UP NEXT IN ${secondsRemaining}S",
-                style = Immersive.Caption.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp),
+                style = Immersive.Caption.copy(
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.1.sp,
+                ),
                 color = tint,
             )
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(3.dp))
             Text(
                 text = song.title,
-                style = Immersive.Title.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                style = Immersive.Title.copy(fontSize = 16.sp, fontWeight = FontWeight.Bold),
                 color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.height(2.dp))
             Text(
                 text = song.singer,
-                style = Immersive.Caption.copy(fontSize = 12.sp),
-                color = tint.copy(alpha = 0.65f),
+                style = Immersive.Caption.copy(fontSize = 13.sp),
+                color = tint.copy(alpha = 0.70f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -1229,16 +1368,18 @@ private fun WidescreenCinematicPanel(
                 }
             }
 
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(16.dp))
 
-            // Desktop-friendly Like Star glyph
-            CircleGlyph(
+            // Desktop-friendly Like Star glyph (48dp hit target)
+            TvCircleGlyph(
                 icon = if (state.liked) Icons.Rounded.Star else Icons.Rounded.StarBorder,
                 contentDescription = stringResource(
                     if (state.liked) R.string.immersive_player_unlike else R.string.immersive_player_like,
                 ),
                 onClick = actions.toggleLike,
                 active = state.liked,
+                tint = if (state.liked) Color(0xFFFFD700) else tint,
+                size = 48.dp,
             )
         }
     }
@@ -1257,16 +1398,16 @@ private fun WidescreenRightPanel(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(22.dp))
             .background(Color.Black.copy(alpha = 0.32f))
-            .border(1.dp, tint.copy(alpha = 0.10f), RoundedCornerShape(20.dp)),
+            .border(1.dp, tint.copy(alpha = 0.12f), RoundedCornerShape(22.dp)),
     ) {
         Column(Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 WidescreenTabButton(
@@ -1285,7 +1426,7 @@ private fun WidescreenRightPanel(
 
             Crossfade(
                 targetState = currentTab,
-                animationSpec = tween(220),
+                animationSpec = tween(240, easing = FastOutSlowInEasing),
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
@@ -1295,13 +1436,13 @@ private fun WidescreenRightPanel(
                     WidescreenRightTab.LYRICS -> {
                         ImmersiveLyricsPanel(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }
                     WidescreenRightTab.QUEUE -> {
                         ImmersiveQueuePanel(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }
                 }
@@ -1310,7 +1451,7 @@ private fun WidescreenRightPanel(
     }
 }
 
-/** Clickable tab button with underline and hover indicator. */
+/** Clickable tab button with underline and hover indicator (48dp minimum hit target). */
 @Composable
 private fun WidescreenTabButton(
     title: String,
@@ -1320,11 +1461,12 @@ private fun WidescreenTabButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
 
     Column(
         modifier = Modifier
-            .desktopClickable(minTargetSize = 40.dp, hoverHighlight = true, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .desktopClickable(minTargetSize = 48.dp, hoverHighlight = true, shape = RoundedCornerShape(8.dp), onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Text(
             text = title,
@@ -1333,13 +1475,13 @@ private fun WidescreenTabButton(
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 letterSpacing = 1.2.sp,
             ),
-            color = if (selected) Color.White else if (isHovered) Color.White.copy(alpha = 0.85f) else tint.copy(alpha = 0.50f),
+            color = if (selected) Color.White else if (isHovered || isFocused) Color.White.copy(alpha = 0.90f) else tint.copy(alpha = 0.50f),
         )
         Spacer(Modifier.height(4.dp))
         Box(
             modifier = Modifier
-                .width(24.dp)
-                .height(2.dp)
+                .width(28.dp)
+                .height(2.5.dp)
                 .clip(CircleShape)
                 .background(if (selected) tint else Color.Transparent),
         )
@@ -1348,6 +1490,10 @@ private fun WidescreenTabButton(
 
 /**
  * Bottom Playback Bar for Widescreen TV mode.
+ * - Symmetrical 3-part layout (left, center, right) keeping transport controls perfectly centered.
+ * - Removed duplicate song title & artist info from bottom-left.
+ * - Enlarged clickable surfaces (>= 56dp for main transport controls).
+ * - Clear hover, focus, and tactile press animations.
  */
 @OptIn(ExperimentalGlideComposeApi::class, ExperimentalFoundationApi::class)
 @Composable
@@ -1364,9 +1510,10 @@ private fun WidescreenBottomBar(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.Black.copy(alpha = 0.38f))
-            .border(1.dp, tint.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF101014).copy(alpha = 0.82f))
+            .border(1.dp, tint.copy(alpha = 0.14f), RoundedCornerShape(20.dp))
+            .shadow(16.dp, RoundedCornerShape(20.dp))
             .padding(horizontal = 24.dp, vertical = 12.dp),
     ) {
         PlayerScrubber(state = state, onSeek = actions.seekTo)
@@ -1377,49 +1524,28 @@ private fun WidescreenBottomBar(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Left segment: Album thumbnail + Track info
+            // Left segment: Clean Star / Like action balancing the layout (NO duplicate title/artist)
             Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .desktopClickable(minTargetSize = 44.dp, onClick = actions.openAlbum),
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.Black.copy(alpha = 0.2f)),
-                ) {
-                    GlideImage(
-                        model = state.coverUrl.takeIf { it.isNotBlank() },
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                        requestBuilderTransform = { it.override(120) },
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f, fill = false)) {
-                    Text(
-                        text = if (state.adPlaying) stringResource(R.string.immersive_player_ad) else state.title,
-                        style = Immersive.Title.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = state.artist,
-                        style = Immersive.Caption.copy(fontSize = 13.sp),
-                        color = tint.copy(alpha = 0.65f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                DesktopControlIcon(
+                    icon = if (state.liked) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                    contentDescription = stringResource(
+                        if (state.liked) R.string.immersive_player_unlike else R.string.immersive_player_like,
+                    ),
+                    tint = if (state.liked) Color(0xFFFFD700) else tint.copy(alpha = 0.65f),
+                    active = state.liked,
+                    activeColor = Color(0xFFFFD700),
+                    onClick = actions.toggleLike,
+                    targetSize = 52.dp,
+                )
             }
 
-            // Center segment: Transport Controls
+            // Center segment: Transport Controls (Centered with generous 18dp spacing and >=56dp hit targets)
             Row(
-                modifier = Modifier.weight(1.4f),
+                modifier = Modifier.weight(1.5f),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1433,26 +1559,60 @@ private fun WidescreenBottomBar(
                         },
                     ),
                     tint = if (state.shuffle || state.smart) tint else tint.copy(alpha = 0.45f),
+                    active = state.shuffle || state.smart,
+                    activeColor = tint,
+                    targetSize = 52.dp,
+                    size = 22.dp,
                     onClick = actions.toggleShuffle,
                 )
 
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(18.dp))
 
                 DesktopControlIcon(
                     icon = Icons.Rounded.SkipPrevious,
                     contentDescription = stringResource(R.string.immersive_player_previous),
-                    size = 32.dp,
+                    targetSize = 56.dp,
+                    size = 28.dp,
                     onClick = actions.previous,
                 )
 
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(18.dp))
+
+                // Play / Pause prominent hero button (64dp interactive target)
+                val playInteractionSource = remember { MutableInteractionSource() }
+                val isPlayHovered by playInteractionSource.collectIsHoveredAsState()
+                val isPlayFocused by playInteractionSource.collectIsFocusedAsState()
+                val isPlayPressed by playInteractionSource.collectIsPressedAsState()
+                val reduceMotion = rememberReduceMotion()
+
+                val playScale by animateFloatAsState(
+                    targetValue = when {
+                        reduceMotion -> 1f
+                        isPlayPressed -> 0.92f
+                        isPlayHovered || isPlayFocused -> 1.05f
+                        else -> 1f
+                    },
+                    animationSpec = spring(
+                        dampingRatio = 0.8f,
+                        stiffness = Spring.StiffnessMediumLow,
+                    ),
+                    label = "playScale",
+                )
 
                 Box(
                     modifier = Modifier
-                        .size(52.dp)
+                        .size(64.dp)
+                        .graphicsLayer {
+                            scaleX = playScale
+                            scaleY = playScale
+                        }
+                        .shadow(if (isPlayHovered || isPlayFocused) 12.dp else 6.dp, CircleShape)
                         .clip(CircleShape)
                         .background(Color.White)
-                        .desktopClickable(minTargetSize = 52.dp) {
+                        .then(
+                            if (isPlayFocused) Modifier.border(2.5.dp, tint, CircleShape) else Modifier
+                        )
+                        .desktopClickable(minTargetSize = 64.dp, shape = CircleShape) {
                             Haptics.click()
                             actions.playPause()
                         },
@@ -1462,30 +1622,37 @@ private fun WidescreenBottomBar(
                         CircularProgressIndicator(
                             color = Color.Black,
                             strokeWidth = 3.dp,
-                            modifier = Modifier.size(24.dp),
+                            modifier = Modifier.size(28.dp),
                         )
                     } else {
-                        Icon(
-                            imageVector = if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = stringResource(
-                                if (state.playing) R.string.immersive_player_pause else R.string.immersive_player_play,
-                            ),
-                            tint = Color.Black,
-                            modifier = Modifier.size(30.dp),
-                        )
+                        Crossfade(
+                            targetState = state.playing,
+                            animationSpec = tween(160, easing = FastOutSlowInEasing),
+                            label = "playPauseCrossfade",
+                        ) { playing ->
+                            Icon(
+                                imageVector = if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = stringResource(
+                                    if (playing) R.string.immersive_player_pause else R.string.immersive_player_play,
+                                ),
+                                tint = Color.Black,
+                                modifier = Modifier.size(34.dp),
+                            )
+                        }
                     }
                 }
 
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(18.dp))
 
                 DesktopControlIcon(
                     icon = Icons.Rounded.SkipNext,
                     contentDescription = stringResource(R.string.immersive_player_next),
-                    size = 32.dp,
+                    targetSize = 56.dp,
+                    size = 28.dp,
                     onClick = actions.next,
                 )
 
-                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(18.dp))
 
                 DesktopControlIcon(
                     icon = if (state.repeatMode == ImmersiveRepeat.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
@@ -1495,37 +1662,53 @@ private fun WidescreenBottomBar(
                         else -> stringResource(R.string.immersive_player_repeat_off)
                     },
                     tint = if (state.repeatMode != ImmersiveRepeat.OFF) tint else tint.copy(alpha = 0.45f),
+                    active = state.repeatMode != ImmersiveRepeat.OFF,
+                    activeColor = tint,
+                    targetSize = 52.dp,
+                    size = 22.dp,
                     onClick = actions.cycleRepeat,
                 )
             }
 
-            // Right segment: Volume, Devices, Lyrics/Queue toggles
+            // Right segment: Volume, Devices, Lyrics/Queue toggles (Arrangement.End)
             Row(
-                modifier = Modifier.weight(1.1f),
+                modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    Icons.AutoMirrored.Rounded.VolumeDown,
+                DesktopControlIcon(
+                    icon = Icons.AutoMirrored.Rounded.VolumeDown,
                     contentDescription = stringResource(R.string.immersive_player_volume_down),
-                    tint = tint.copy(alpha = 0.5f),
-                    modifier = Modifier.size(18.dp),
+                    tint = tint.copy(alpha = 0.55f),
+                    targetSize = 48.dp,
+                    size = 20.dp,
+                    onClick = {
+                        val current = volume.level.value
+                        volume.drag((current - 0.05f).coerceAtLeast(0f))
+                        volume.release()
+                    },
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(4.dp))
                 ThinSlider(
                     value = volume.level.value,
                     onValueChange = volume::drag,
                     onValueChangeFinished = volume::release,
-                    idleHeight = 5.dp,
-                    activeHeight = 8.dp,
-                    modifier = Modifier.width(96.dp),
+                    idleHeight = 6.dp,
+                    activeHeight = 10.dp,
+                    modifier = Modifier.width(124.dp),
                 )
-                Spacer(Modifier.width(6.dp))
-                Icon(
-                    Icons.AutoMirrored.Rounded.VolumeUp,
+                Spacer(Modifier.width(4.dp))
+                DesktopControlIcon(
+                    icon = Icons.AutoMirrored.Rounded.VolumeUp,
                     contentDescription = stringResource(R.string.immersive_player_volume_up),
-                    tint = tint.copy(alpha = 0.5f),
-                    modifier = Modifier.size(18.dp),
+                    tint = tint.copy(alpha = 0.55f),
+                    targetSize = 48.dp,
+                    size = 20.dp,
+                    onClick = {
+                        val current = volume.level.value
+                        volume.drag((current + 0.05f).coerceAtMost(1f))
+                        volume.release()
+                    },
                 )
 
                 Spacer(Modifier.width(16.dp))
@@ -1534,10 +1717,13 @@ private fun WidescreenBottomBar(
                     icon = Icons.Rounded.Devices,
                     contentDescription = stringResource(R.string.immersive_player_devices),
                     tint = if (state.deviceName != null) tint else tint.copy(alpha = 0.6f),
+                    active = state.deviceName != null,
+                    targetSize = 52.dp,
+                    size = 24.dp,
                     onClick = onOpenDevices,
                 )
 
-                Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(12.dp))
 
                 DesktopControlIcon(
                     icon = if (rightTab == WidescreenRightTab.LYRICS) Icons.Rounded.Lyrics else Icons.AutoMirrored.Rounded.QueueMusic,
@@ -1545,6 +1731,9 @@ private fun WidescreenBottomBar(
                         if (rightTab == WidescreenRightTab.LYRICS) R.string.immersive_player_lyrics else R.string.immersive_player_queue,
                     ),
                     tint = tint,
+                    active = true,
+                    targetSize = 52.dp,
+                    size = 24.dp,
                     onClick = if (rightTab == WidescreenRightTab.LYRICS) onToggleQueue else onToggleLyrics,
                 )
             }
@@ -1552,7 +1741,10 @@ private fun WidescreenBottomBar(
     }
 }
 
-/** Hover-responsive desktop control glyph with minimum 44dp hit target. */
+/**
+ * Focus- and hover-responsive desktop control glyph with minimum 48-56dp hit target.
+ * Supports smooth spring press feedback, focus rings, hover glow, and icon crossfades.
+ */
 @Composable
 private fun DesktopControlIcon(
     icon: ImageVector,
@@ -1560,24 +1752,70 @@ private fun DesktopControlIcon(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: Dp = 24.dp,
+    targetSize: Dp = 52.dp,
     tint: Color = Color.White,
+    active: Boolean = false,
+    activeColor: Color = LocalPlayerTint.current,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val reduceMotion = rememberReduceMotion()
+
+    val scale by animateFloatAsState(
+        targetValue = when {
+            reduceMotion -> 1f
+            isPressed -> 0.90f
+            isHovered || isFocused -> 1.06f
+            else -> 1f
+        },
+        animationSpec = spring(
+            dampingRatio = 0.8f,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "desktopControlScale",
+    )
+
+    val effectiveTint = if (active) activeColor else tint
+    val bgAlpha = when {
+        isFocused -> 0.28f
+        isHovered -> 0.16f
+        active -> 0.12f
+        else -> 0f
+    }
+    val animatedBgAlpha by animateFloatAsState(bgAlpha, tween(160), label = "desktopControlBg")
+
     Box(
         modifier = modifier
-            .size(44.dp)
+            .size(targetSize)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .clip(CircleShape)
-            .desktopClickable(minTargetSize = 44.dp, hoverHighlight = true, shape = CircleShape) {
+            .background(effectiveTint.copy(alpha = animatedBgAlpha))
+            .then(
+                if (isFocused) Modifier.border(2.dp, effectiveTint.copy(alpha = 0.65f), CircleShape) else Modifier
+            )
+            .desktopClickable(minTargetSize = targetSize, shape = CircleShape) {
                 Haptics.click()
                 onClick()
             }
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = tint,
-            modifier = Modifier.size(size),
-        )
+        Crossfade(
+            targetState = icon,
+            animationSpec = tween(160, easing = FastOutSlowInEasing),
+            label = "desktopControlCrossfade",
+        ) { targetIcon ->
+            Icon(
+                imageVector = targetIcon,
+                contentDescription = null,
+                tint = effectiveTint,
+                modifier = Modifier.size(size),
+            )
+        }
     }
 }

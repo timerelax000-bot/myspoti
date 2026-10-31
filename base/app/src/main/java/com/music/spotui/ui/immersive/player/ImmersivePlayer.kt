@@ -138,7 +138,7 @@ internal val PLAYER_MAX_WIDTH = 560.dp
 /** How long the sleeve takes to travel between the full player and the header. */
 private const val PANEL_TRAVEL_MS = com.music.spotui.ui.immersive.motion.ImmersiveMotion.LONG_MS
 
-private val ArtCorner = RoundedCornerShape(8.dp)
+private val ArtCorner = RoundedCornerShape(14.dp)
 
 /** What the middle of the player shows. */
 private object Panel {
