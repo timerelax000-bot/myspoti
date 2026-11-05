@@ -161,6 +161,14 @@ fun MyNavHost(
             if (isImmersive()) com.music.spotui.ui.immersive.pages.ImmersiveEqualizerScreen(navHostController) else com.music.spotui.ui.screens.EqualizerScreen(navHostController)
         }
 
+        page(Routes.ImmersiveExperienceSettings.route) {
+            LaunchedEffect(playerState) {
+                bottomBarState.value = false
+                bottomBarPlayerState.value = false
+            }
+            com.music.spotui.ui.screens.ImmersiveExperienceSettingsScreen(onBack = { navHostController.popBackStack() })
+        }
+
         page(Routes.NewReleases.route) {
             LaunchedEffect(playerState) {
                 bottomBarState.value = true
@@ -225,6 +233,38 @@ fun MyNavHost(
                 bottomBarPlayerState.value = playerState != ""
             }
             if (isImmersive()) com.music.spotui.ui.immersive.pages.ImmersiveSettingsScreen(navHostController) else com.music.spotui.ui.screens.SettingsScreen(navHostController)
+        }
+
+        page(Routes.Accounts.route) {
+            LaunchedEffect(playerState) {
+                bottomBarState.value = false
+                bottomBarPlayerState.value = false
+            }
+            com.music.spotui.ui.screens.AccountsScreen(navHostController, onBack = { navHostController.popBackStack() })
+        }
+
+        page(Routes.CarMode.route) {
+            LaunchedEffect(playerState) {
+                bottomBarState.value = false
+                bottomBarPlayerState.value = false
+            }
+            com.music.spotui.car.CarModeScreen(navHostController)
+        }
+
+        page(Routes.CarModeSettings.route) {
+            LaunchedEffect(playerState) {
+                bottomBarState.value = false
+                bottomBarPlayerState.value = false
+            }
+            com.music.spotui.ui.screens.CarModeSettingsScreen(navHostController)
+        }
+
+        page(Routes.FullscreenPlayer.route) {
+            LaunchedEffect(playerState) {
+                bottomBarState.value = false
+                bottomBarPlayerState.value = false
+            }
+            com.music.spotui.ui.screens.FullscreenNowPlayingScreen(navHostController)
         }
 
         // Extensions: the Store and Installed tabs; one installed extension's page; a repository's extension before install.

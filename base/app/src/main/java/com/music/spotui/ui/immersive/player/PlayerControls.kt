@@ -39,6 +39,17 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.rounded.CenterFocusWeak
+import androidx.compose.material.icons.rounded.OndemandVideo
+import androidx.compose.material.icons.rounded.GraphicEq
+import kotlinx.coroutines.delay
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
@@ -621,5 +632,84 @@ internal fun PlayerActionRow(
                 )
             }
         }
+    }
+}
+
+/**
+ * Single Music Video button supporting short tap (video ON/OFF) and 2-second long press (audio handoff).
+ */
+@Composable
+fun LongPressVideoButton(
+    videoOn: Boolean,
+    videoAudioActive: Boolean = false,
+    onShortClick: () -> Unit,
+    onLongPressComplete: () -> Unit,
+    modifier: Modifier = Modifier,
+    durationMs: Long = 2000L,
+) {
+    var isPressing by remember { mutableStateOf(false) }
+    var pressProgress by remember { mutableFloatStateOf(0f) }
+    var longPressTriggered by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isPressing) {
+        if (!isPressing) {
+            pressProgress = 0f
+            return@LaunchedEffect
+        }
+        longPressTriggered = false
+        val startTime = System.currentTimeMillis()
+        while (isPressing && pressProgress < 1f) {
+            val elapsed = System.currentTimeMillis() - startTime
+            pressProgress = (elapsed.toFloat() / durationMs).coerceIn(0f, 1f)
+            if (pressProgress >= 1f) {
+                longPressTriggered = true
+                onLongPressComplete()
+                isPressing = false
+                break
+            }
+            delay(16)
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(if (videoAudioActive) Color(0xFF1DB954).copy(alpha = 0.35f) else if (videoOn) LocalPlayerTint.current.copy(alpha = 0.20f) else Color.Transparent)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        isPressing = true
+                        longPressTriggered = false
+                        try {
+                            awaitRelease()
+                        } finally {
+                            isPressing = false
+                            pressProgress = 0f
+                        }
+                    },
+                    onTap = {
+                        if (!longPressTriggered) {
+                            onShortClick()
+                        }
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isPressing && pressProgress > 0f) {
+            CircularProgressIndicator(
+                progress = { pressProgress },
+                modifier = Modifier.size(38.dp),
+                color = if (videoAudioActive) Color(0xFF1DB954) else Color.White,
+                strokeWidth = 2.5.dp,
+            )
+        }
+        Icon(
+            imageVector = Icons.Rounded.OndemandVideo,
+            contentDescription = "Music Video",
+            tint = if (videoAudioActive) Color(0xFF1DB954) else if (videoOn) Color.White else LocalPlayerTint.current.copy(alpha = 0.6f),
+            modifier = Modifier.size(22.dp),
+        )
     }
 }

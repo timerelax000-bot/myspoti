@@ -33,6 +33,9 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -693,6 +696,7 @@ private fun PanelRow(
     val staggerDelay = behind.coerceIn(0, STAGGER_STEPS) * STAGGER_FRACTION * run.durationMs
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val isFocused by interaction.collectIsFocusedAsState()
     // Where the finger went down and how wide the row was: a tap plays from the word it hit.
     var pressAt by remember { mutableStateOf(Offset.Zero) }
     var pressWidth by remember { mutableStateOf(0) }
@@ -700,6 +704,7 @@ private fun PanelRow(
     val scale by animateFloatAsState(
         targetValue = when {
             pressed -> PRESSED_SCALE
+            isFocused -> 1.03f
             isActive || !synced -> 1f
             else -> INACTIVE_SCALE
         },
@@ -727,7 +732,7 @@ private fun PanelRow(
             // Anchored to the left edge (the right one for the second singer), so the words don't
             // slide sideways under the highlight.
             transformOrigin = TransformOrigin(if (lane == true) 1f else 0f, 0.5f)
-            alpha = lineAlpha
+            alpha = if (isFocused) 1f else lineAlpha
             // Held back against the list's own movement: the list has already taken this row
             // part of the way, so giving back what it has not earned yet is what leaves it
             // trailing. Rows with nothing to catch up on never read the clock at all.
@@ -741,9 +746,10 @@ private fun PanelRow(
                     )
             }
         }
-        .blur(blur, BlurredEdgeTreatment.Unbounded)
+        .blur(if (isFocused) 0.dp else blur, BlurredEdgeTreatment.Unbounded)
         .clip(RoundedCornerShape(10.dp))
-        .background(pickedFill)
+        .background(if (isFocused) Color.White.copy(alpha = 0.14f) else pickedFill)
+        .then(if (isFocused) Modifier.border(1.5.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(10.dp)) else Modifier)
         .then(if (onNote != null) Modifier.drawWithCache {
             // Genius explains this line: each row of its words sits on a faint pill, as Genius
             // marks the lines it explains. Drawn behind the words, inside the row, so the sweep
@@ -765,6 +771,7 @@ private fun PanelRow(
         } else Modifier)
         .secondaryClick(onHold)
         .lastPress { at, size -> pressAt = at; pressWidth = size.width }
+        .focusable(interactionSource = interaction, enabled = synced || onHold != null || onPick != null)
         .combinedClickable(
             enabled = synced || onHold != null || onPick != null, interactionSource = interaction, indication = null,
             onLongClick = onHold,
@@ -773,7 +780,8 @@ private fun PanelRow(
                 else if (synced) {
                     val room = with(density) { GLOW_ROOM.roundToPx() }
                     val laid = measureNoteLine(noteMeasurer, row.text, lineStyle, pressWidth, room)
-                    onSeek(tapTime(row.swept, laid, pressAt - Offset(room.toFloat(), room.toFloat())))
+                    val tapPos = if (pressAt != Offset.Zero) pressAt - Offset(room.toFloat(), room.toFloat()) else Offset.Zero
+                    onSeek(if (tapPos != Offset.Zero) tapTime(row.swept, laid, tapPos) else row.timeMs)
                 }
             },
         )

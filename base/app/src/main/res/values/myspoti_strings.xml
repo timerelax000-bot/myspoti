@@ -246,6 +246,7 @@
     <string name="local_folders_detail">Choose the folders shown in Local Files. Messaging apps and recordings start hidden.</string>
     <string name="smart_shuffle_title">Smart shuffle</string>
     <string name="smart_shuffle_on">Smart shuffle: Spotify recommendations join the shuffled playlist.</string>
+    <string name="manage_recommendations">Manage recommendations</string>
     <string name="track_sort_added">Date added</string>
     <string name="settings_title">Settings</string>
     <string name="settings_detail">Sound quality, downloads, data, battery and language</string>

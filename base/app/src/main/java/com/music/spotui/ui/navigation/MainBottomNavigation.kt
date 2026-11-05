@@ -102,7 +102,7 @@ fun MainBottomNavigation(navController: NavHostController, bottomBarState: Mutab
     // Visibility follows the screen actually shown (not flags each screen sets,
     // which raced during transitions and left the mini player over the full one).
     val shownRoute = navController.currentBackStackEntryAsState().value?.destination?.route
-    val fullScreen = shownRoute == Routes.Player.route || shownRoute == Routes.Queue.route
+    val fullScreen = shownRoute == Routes.Player.route || shownRoute == Routes.Queue.route || shownRoute == Routes.CarMode.route
     val hasTrack = com.music.spotui.di.Graph.currentSongState.title.value.isNotBlank()
     // No motion of its own: the bar sits above the pages, so sliding it while the
     // player rises (or collapses behind it) made one gesture look like two.
@@ -230,7 +230,7 @@ private fun rememberTabNavigation(navController: NavHostController): TabNavigati
 @Composable
 fun MainNavigationRail(navController: NavHostController) {
     val shownRoute = navController.currentBackStackEntryAsState().value?.destination?.route
-    if (shownRoute == Routes.Player.route || shownRoute == Routes.Queue.route) return
+    if (shownRoute == Routes.Player.route || shownRoute == Routes.Queue.route || shownRoute == Routes.CarMode.route) return
     val tabs = rememberTabNavigation(navController)
     Column(
         modifier = Modifier

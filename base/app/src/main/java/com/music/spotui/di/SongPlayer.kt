@@ -183,12 +183,20 @@ object SongPlayer {
      */
     private fun waiting(s: PlayerState) = s.isBuffering || soundStalled || (playing && s.isPaused)
 
+    @Volatile private var disconnectGuardUntil = 0L
+
     /** Myspoti itself asked the engine to play lately (a pick, a play, a skip): not another device's doing. */
     fun engineIntended(): Boolean =
         SystemClock.elapsedRealtime() < wantPlayingUntil || pendingTrackId != null || resumeWhenReady
 
     private fun resolvePlaying(paused: Boolean): Boolean {
         val now = SystemClock.elapsedRealtime()
+        if (now < disconnectGuardUntil) {
+            if (!paused) {
+                transport(pullBack = false) { api.player.pause() }
+            }
+            return false
+        }
         if (now < wantPlayingUntil) {
             if (!paused) wantPlayingUntil = 0
             return true
@@ -238,6 +246,8 @@ object SongPlayer {
     private val main = Handler(Looper.getMainLooper())
     private var boundState: CurrentSongState? = null
 
+    private var engineJob: kotlinx.coroutines.Job? = null
+
     /** Wires the API's flows into the UI's now-playing state. Call once, on the main thread. */
     fun attachEngine(state: CurrentSongState) {
         boundState = state
@@ -247,7 +257,57 @@ object SongPlayer {
             com.music.spotui.data.preferences.isLyricsWordSync(Graph.app)
         restoreLastTrack(state)
         restoreRepeat(state)
-        scope.launch { api.player.state.collect { s -> if (acceptsSessionUpdates()) applyState(s) } }
+
+        engineJob?.cancel()
+        engineJob = scope.launch {
+            while (true) {
+                val currentApi = MyspotiRuntime.spotify
+                val j1 = launch { currentApi.player.state.collect { s -> if (acceptsSessionUpdates()) applyState(s) } }
+                val j2 = launch { currentApi.player.queue.collect { q -> if (acceptsSessionUpdates()) applyQueue(q) } }
+                val j3 = launch { currentApi.library.changes.collect { refreshCurrentLiked() } }
+                val j4 = launch { currentApi.player.stalled.collect { on -> onSoundStalled(on) } }
+                val j5 = launch {
+                    currentApi.player.adPlaying.collectLatest { on ->
+                        if (on) {
+                            kotlinx.coroutines.delay(AD_SHOW_AFTER_MS)
+                            while (MyspotiRuntime.host.licenseLimited()) kotlinx.coroutines.delay(1_000)
+                        }
+                        onAdPlaying(on)
+                    }
+                }
+                val j6 = launch {
+                    currentApi.player.refused.collect {
+                        val message = if (currentApi.player.drmMissing.value) app.myspoti.engine.R.string.drm_missing else app.myspoti.engine.R.string.play_refused
+                        android.widget.Toast.makeText(Graph.app, message, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                val j7 = launch {
+                    currentApi.player.refusedAll.collect {
+                        android.widget.Toast.makeText(Graph.app, app.myspoti.engine.R.string.play_refused_all, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                val j8 = launch {
+                    currentApi.player.skipChained.collect {
+                        android.widget.Toast.makeText(Graph.app, app.myspoti.engine.R.string.songs_skipped_by_spotify, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                val j9 = launch {
+                    currentApi.player.licencesRefused.collect {
+                        android.widget.Toast.makeText(Graph.app, app.myspoti.engine.R.string.licences_refused_by_spotify, android.widget.Toast.LENGTH_LONG).show()
+                    }
+                }
+                val j10 = launch {
+                    currentApi.player.drmMissing.first { it }
+                    android.widget.Toast.makeText(Graph.app, app.myspoti.engine.R.string.drm_missing, android.widget.Toast.LENGTH_LONG).show()
+                }
+
+                while (currentApi == MyspotiRuntime.spotify) {
+                    kotlinx.coroutines.delay(500)
+                }
+                listOf(j1, j2, j3, j4, j5, j6, j7, j8, j9, j10).forEach { it.cancel() }
+            }
+        }
+
         ConnectMirror.attach()
         // Another device plays (the phone as a remote): the state is read again every few seconds
         // so the notification, the mini player and the slider keep up. Reported: the notification
@@ -279,8 +339,6 @@ object SongPlayer {
                 runCatching { MyspotiRuntime.spotify.player.refresh() }
             }
         }
-        scope.launch { api.player.queue.collect { q -> if (acceptsSessionUpdates()) applyQueue(q) } }
-        scope.launch { MyspotiRuntime.spotify.player.stalled.collect { on -> onSoundStalled(on) } }
         // Smart shuffle plays a mixed order as the list and leaves Spotify's own shuffle off, so
         // turning it off sends no shuffle command at all (the button finds shuffle already off):
         // the list's own order comes back here.
@@ -292,50 +350,10 @@ object SongPlayer {
                 if (ended != null) endSmartShuffle(ended)
             }
         }
-        scope.launch { api.library.changes.collect { refreshCurrentLiked() } }
         // T4: the player keeps the ad out of [api.player.state] on purpose (the last song stays
         // there, buffering); its own flag is collected here so the UI can say an ad is on. Only an
         // ad that is still on after AD_SHOW_AFTER_MS is shown: a blocked ad is gone within a second
         // (its audio is refused, the page moves on), and showing it only made the screens blink.
-        scope.launch {
-            MyspotiRuntime.spotify.player.adPlaying.collectLatest { on ->
-                if (on) {
-                    kotlinx.coroutines.delay(AD_SHOW_AFTER_MS)
-                    // Spotify limiting playback holds every repair, the ad's too: the limit is what
-                    // the user is told (its toast), not an ad for as long as it lasts (50 s seen).
-                    while (MyspotiRuntime.host.licenseLimited()) kotlinx.coroutines.delay(1_000)
-                }
-                onAdPlaying(on)
-            }
-        }
-        scope.launch {
-            MyspotiRuntime.spotify.player.refused.collect {
-                // No Widevine in this WebView: the refusal is the WebView's, not the account's.
-                val message = if (MyspotiRuntime.spotify.player.drmMissing.value) app.myspoti.engine.R.string.drm_missing else app.myspoti.engine.R.string.play_refused
-                android.widget.Toast.makeText(Graph.app, message, android.widget.Toast.LENGTH_LONG).show()
-            }
-        }
-        scope.launch {
-            MyspotiRuntime.spotify.player.refusedAll.collect {
-                android.widget.Toast.makeText(Graph.app, app.myspoti.engine.R.string.play_refused_all, android.widget.Toast.LENGTH_LONG).show()
-            }
-        }
-        scope.launch {
-            MyspotiRuntime.spotify.player.skipChained.collect {
-                android.widget.Toast.makeText(Graph.app, app.myspoti.engine.R.string.songs_skipped_by_spotify, android.widget.Toast.LENGTH_LONG).show()
-            }
-        }
-        scope.launch {
-            MyspotiRuntime.spotify.player.licencesRefused.collect {
-                android.widget.Toast.makeText(Graph.app, app.myspoti.engine.R.string.licences_refused_by_spotify, android.widget.Toast.LENGTH_LONG).show()
-            }
-        }
-        // Said once the page has asked its WebView: a device that cannot decrypt Spotify's streams
-        // plays nothing (no sound, 0:00), and nothing else in the app says why.
-        scope.launch {
-            MyspotiRuntime.spotify.player.drmMissing.first { it }
-            android.widget.Toast.makeText(Graph.app, app.myspoti.engine.R.string.drm_missing, android.widget.Toast.LENGTH_LONG).show()
-        }
         scope.launch {
             MyspotiRuntime.host.licenseLimitedUntil.collect { until ->
                 if (until > SystemClock.elapsedRealtime()) main.post {
@@ -443,6 +461,8 @@ object SongPlayer {
     /** Call on the main thread before navigating to logout. */
     fun clearSession() {
         main.removeCallbacksAndMessages(null)
+        engineJob?.cancel()
+        engineJob = null
         // A play, pause or skip still waiting (a slow page, a page still loading) belongs to the
         // session that ends: it is dropped, not sent once the next account's page is ready.
         sessionGen.incrementAndGet()
@@ -1474,6 +1494,7 @@ object SongPlayer {
 
     /** [by]: who asked, for the diagnostic (the app's screens, the media session, an extension...). */
     fun play(by: String = "user") {
+        disconnectGuardUntil = 0L
         val now = SystemClock.elapsedRealtime()
         if (now - lastPlayTapAt < 180L) return
         lastPlayTapAt = now
@@ -1517,6 +1538,15 @@ object SongPlayer {
         lastPauseTapAt = now
         app.myspoti.host.android.Logbook.log("pause asked by $by")
         Haptics.click(); cancelBurst(); pauseSilently()
+    }
+
+    /** Set a guard to prevent delayed auto-resumes after explicit disconnect. */
+    fun setDisconnectGuard() {
+        val now = SystemClock.elapsedRealtime()
+        disconnectGuardUntil = now + 6000L
+        wantPlayingUntil = 0L
+        wantPausedUntil = now + 6000L
+        pauseSilently()
     }
 
     /** [send] false: the engine has paused already (the sleep timer's fade). */

@@ -817,16 +817,82 @@ object MusicVideoController {
     }
 
     private const val SOUND_KEY = "#sound"
+    enum class AudioHandoffState {
+        SPOTIFY_AUDIO,
+        VIDEO_MUTED,
+        VIDEO_AUDIO,
+        TRANSITION_TO_SPOTIFY,
+        TRANSITION_TO_VIDEO,
+    }
+
+    val audioHandoffState = mutableStateOf(AudioHandoffState.SPOTIFY_AUDIO)
+
     private val prefs by lazy { app.getSharedPreferences("music_video", Context.MODE_PRIVATE) }
 
     /** The clip's own sound is heard instead of the song's (kept across songs and restarts). */
     val clipSound = mutableStateOf(false).also { st -> scope.launch { st.value = prefs.getBoolean("clip_sound", false) } }
 
-    fun setClipSound(value: Boolean) {
+    val isVideoAudioActive: Boolean get() = clipSound.value && hushed
+
+    fun handleShortClick() {
         com.music.spotui.di.Haptics.click()
+        val s = state.value
+        if (on.value) {
+            // Video is already ON (muted or playing video audio): turn OFF video completely
+            setClipSound(false)
+            hush(false)
+            fullscreen.value = false
+            wantVideo = false
+            on.value = false
+            stop()
+            audioHandoffState.value = AudioHandoffState.SPOTIFY_AUDIO
+        } else {
+            // Video is OFF: turn ON video muted
+            if (s !is State.Ready) return
+            setClipSound(false)
+            hush(false)
+            wantVideo = true
+            on.value = true
+            audioHandoffState.value = AudioHandoffState.VIDEO_MUTED
+            start(s)
+        }
+    }
+
+    fun handleLongPress(context: Context? = null) {
+        val s = state.value
+        if (s !is State.Ready) {
+            context?.let { android.widget.Toast.makeText(it, "No video available for this track", android.widget.Toast.LENGTH_SHORT).show() }
+            return
+        }
+        com.music.spotui.di.Haptics.confirm()
+
+        if (clipSound.value && hushed) {
+            // Video audio is active: toggle back to Spotify audio while keeping video visible & muted
+            setClipSound(false)
+            hush(false)
+            audioHandoffState.value = AudioHandoffState.VIDEO_MUTED
+        } else {
+            // Video audio is not active: enable video audio and keep video visible
+            if (!on.value) {
+                wantVideo = true
+                on.value = true
+                start(s)
+            }
+            hush(true)
+            setClipSound(true)
+            audioHandoffState.value = AudioHandoffState.VIDEO_AUDIO
+        }
+    }
+
+    fun setClipSound(value: Boolean) {
         clipSound.value = value
         prefs.edit().putBoolean("clip_sound", value).apply()
-        if (!value) hush(false)
+        if (!value) {
+            hush(false)
+            audioHandoffState.value = if (on.value) AudioHandoffState.VIDEO_MUTED else AudioHandoffState.SPOTIFY_AUDIO
+        } else {
+            audioHandoffState.value = AudioHandoffState.VIDEO_AUDIO
+        }
         // The clip is played again with (or without) its soundtrack, at the same place.
         (state.value as? State.Ready)?.let { if (on.value) start(it) }
     }
@@ -988,6 +1054,7 @@ object MusicVideoController {
     fun clearSession() {
         wantVideo = false
         on.value = false
+        audioHandoffState.value = AudioHandoffState.SPOTIFY_AUDIO
         prepareJob?.cancel()
         prefetchJobs.values.forEach { it.cancel() }
         settledId = ""

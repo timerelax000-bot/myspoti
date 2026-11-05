@@ -26,10 +26,10 @@ object MyspotiRuntime {
     val loginRequired: StateFlow<Boolean> get() = host.loginRequired
 
     /** [loadPage] false (data saver on a metered network): nothing goes out until [resume]. */
-    fun start(context: Context, loadPage: Boolean = true) {
+    fun start(context: Context, loadPage: Boolean = true, profileName: String? = null) {
         if (isStarted) return
         val updater = app.myspoti.spotify.gql.GqlOpsUpdater(okhttp3.OkHttpClient(), java.io.File(context.filesDir, "spotify/gql-ops.json"))
-        host = WebPlayerHost(context)
+        host = WebPlayerHost(context, profileName = profileName)
         AudioModeWatch.install(context.applicationContext)
         spotify = SpotifyApi(host, scope, language = Locale.getDefault().language, ops = updater.load(), deviceId = clientDeviceId(context), userAgent = host.userAgent)
         spotify.bridge.logger = { line -> Logbook.log(line) }
@@ -109,6 +109,36 @@ object MyspotiRuntime {
         scope.launch {
             runCatching { updater.refresh(spotify.opsInUse) }.getOrNull()?.let(spotify::updateOps)
         }
+    }
+
+    var onSessionReset: (() -> Unit)? = null
+    var onHostRecreated: ((WebPlayerHost) -> Unit)? = null
+
+    fun switchAccount(context: Context, profileName: String?) {
+        var oldContainer: android.view.ViewGroup? = null
+        var oldVisible = false
+        runCatching {
+            if (isStarted) {
+                oldContainer = host.container
+                oldVisible = host.lastVisible
+                scope.launch { runCatching { spotify.player.pause() } }
+                host.flushCookies()
+                host.destroy()
+            }
+        }
+        onSessionReset?.invoke()
+        val updater = app.myspoti.spotify.gql.GqlOpsUpdater(okhttp3.OkHttpClient(), java.io.File(context.filesDir, "spotify/gql-ops.json"))
+        host = WebPlayerHost(context, profileName = profileName)
+        oldContainer?.let { host.attach(it, oldVisible) }
+        onHostRecreated?.invoke(host)
+        spotify = SpotifyApi(host, scope, language = Locale.getDefault().language, ops = updater.load(), deviceId = clientDeviceId(context), userAgent = host.userAgent)
+        spotify.bridge.logger = { line -> Logbook.log(line) }
+        host.onPageLoaded = { scope.launch { spotify.onPageLoaded() } }
+        host.onPageStarting = { spotify.onPageStarting() }
+        spotify.player.reloadHost = { host.reload() }
+        spotify.player.recoveryHeld = { host.licenseLimited() || host.loginRequired.value }
+        spotify.player.playbackHeld = { host.licenseLimited() }
+        host.load()
     }
 
     /** True when the Web Player holds a signed-in user's token (not an anonymous one). */

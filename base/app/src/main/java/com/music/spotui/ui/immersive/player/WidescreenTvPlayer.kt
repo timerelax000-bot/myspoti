@@ -66,6 +66,9 @@ import androidx.compose.material.icons.filled.OndemandVideo
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Devices
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.FormatListBulleted
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Movie
@@ -73,12 +76,14 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -133,6 +138,9 @@ import com.music.spotui.ui.components.secondaryClick
 import com.music.spotui.ui.immersive.Immersive
 import com.music.spotui.ui.immersive.lyrics.ImmersiveLyricsPanel
 import com.music.spotui.ui.immersive.lyrics.ImmersiveQueuePanel
+import com.music.spotui.ui.look.MeshGradientBackground
+import com.music.spotui.ui.look.rememberArtworkColors
+import com.music.spotui.ui.components.rememberFrameClock
 import com.music.spotui.ui.look.MeshPalette
 import com.music.spotui.ui.look.ThinSlider
 import com.music.spotui.ui.look.rememberArtworkColors
@@ -180,6 +188,7 @@ internal fun WidescreenTvPlayer(
 
     // Current TV Preset (persisted)
     var currentPreset by remember { mutableStateOf(TvModePref.layoutPreset) }
+    var showPresetMenu by remember { mutableStateOf(false) }
     fun selectPreset(preset: String) {
         currentPreset = preset
         TvModePref.setLayout(context, preset)
@@ -287,13 +296,16 @@ internal fun WidescreenTvPlayer(
             )
         } else {
             // ── REGULAR TV PLAYER MODES (STABLE OVERLAY LAYOUT) ──
-            // Layer 1: Main Presets Container (Constant dimension, zero jitter on auto-hide)
+            // Layer 1: Main Presets Container
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
-                    .padding(top = 56.dp, bottom = 96.dp),
+                    .padding(
+                        top = if (currentPreset == TvModePref.LAYOUT_BALANCED) 0.dp else 48.dp,
+                        bottom = if (currentPreset == TvModePref.LAYOUT_BALANCED) 0.dp else 96.dp,
+                    ),
             ) {
                 Crossfade(
                     targetState = currentPreset,
@@ -334,7 +346,7 @@ internal fun WidescreenTvPlayer(
                             )
                         }
                         else -> {
-                            // Balanced Mode (Default)
+                            // Balanced Mode (Default 1:1 matching reference image)
                             BalancedPreset(
                                 state = state,
                                 actions = actions,
@@ -344,8 +356,11 @@ internal fun WidescreenTvPlayer(
                                 onCanvasFirstFrame = { canvasReady = true },
                                 videoOn = videoOn,
                                 pauseScale = pauseScale,
+                                volume = volume,
                                 rightTab = rightTab,
                                 onSelectTab = { rightTab = it },
+                                onOpenPresets = { showPresetMenu = true },
+                                onMore = onMore,
                             )
                         }
                     }
@@ -364,34 +379,38 @@ internal fun WidescreenTvPlayer(
                 )
             }
 
-            // Layer 2: Top Bar (Animated Visibility Overlay for Auto-Hide)
-            AnimatedVisibility(
-                visible = controlsVisible,
-                enter = fadeIn(tween(240, easing = FastOutSlowInEasing)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { -it },
-                exit = fadeOut(tween(200, easing = FastOutSlowInEasing)) + slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { -it },
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .statusBarsPadding(),
-            ) {
-                WidescreenTopBar(
-                    state = state,
-                    tint = tint,
-                    currentPreset = currentPreset,
-                    onSelectPreset = ::selectPreset,
-                    videoReady = videoReady,
-                    videoOn = videoOn,
-                    onToggleVideo = { mv.setOn(!videoOn) },
-                    onMore = onMore,
-                    onSource = onSource,
-                    onClose = actions.close,
-                    onMenuStateChange = { menuOpen = it },
-                )
+            // Layer 2: Top Bar (Shown for Cinema, Lyrics, Minimal presets when controls are visible)
+            if (currentPreset != TvModePref.LAYOUT_BALANCED) {
+                AnimatedVisibility(
+                    visible = controlsVisible,
+                    enter = fadeIn(tween(240, easing = FastOutSlowInEasing)) + slideInVertically(tween(240, easing = FastOutSlowInEasing)) { -it },
+                    exit = fadeOut(tween(200, easing = FastOutSlowInEasing)) + slideOutVertically(tween(200, easing = FastOutSlowInEasing)) { -it },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .statusBarsPadding(),
+                ) {
+                    WidescreenTopBar(
+                        state = state,
+                        tint = tint,
+                        currentPreset = currentPreset,
+                        onSelectPreset = ::selectPreset,
+                        videoReady = videoReady,
+                        videoOn = videoOn,
+                        onToggleVideo = { mv.handleShortClick() },
+                        rightTab = rightTab,
+                        onSelectTab = { rightTab = it },
+                        onMore = onMore,
+                        onSource = onSource,
+                        onClose = actions.close,
+                        onMenuStateChange = { menuOpen = it },
+                    )
+                }
             }
 
-            // Layer 3: Bottom Playback Control Bar (Animated Visibility Overlay for Auto-Hide)
+            // Layer 3: Bottom Playback Control Bar (Shown for Cinema, Lyrics, Minimal presets)
             AnimatedVisibility(
-                visible = controlsVisible,
+                visible = controlsVisible && currentPreset != TvModePref.LAYOUT_BALANCED,
                 enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) + slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it },
                 exit = fadeOut(tween(220, easing = FastOutSlowInEasing)) + slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it },
                 modifier = Modifier
@@ -505,193 +524,234 @@ private fun WidescreenTopBar(
     videoReady: Boolean,
     videoOn: Boolean,
     onToggleVideo: () -> Unit,
+    rightTab: Int = WidescreenRightTab.LYRICS,
+    onSelectTab: (Int) -> Unit = {},
     onMore: (() -> Unit)?,
     onSource: () -> Unit,
     onClose: () -> Unit,
     onMenuStateChange: (Boolean) -> Unit,
 ) {
+    val context = LocalContext.current
     var showPresetMenu by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .height(56.dp)
-            .padding(horizontal = 32.dp),
+            .padding(horizontal = 28.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        // Context / Playing from
-        val contextName = state.contextName.ifEmpty {
-            if (state.album.isNotBlank()) state.album else state.title
-        }
+        // Top-Left Row of 6 Translucent Circular Icon Buttons matching reference image
         Row(
-            modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (state.contextName.isNotBlank() || state.album.isNotBlank()) {
-                Text(
-                    text = "PLAYING FROM",
-                    style = Immersive.Caption.copy(
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp,
-                    ),
-                    color = tint.copy(alpha = 0.45f),
-                )
-                Spacer(Modifier.width(8.dp))
-            }
-            Text(
-                text = contextName,
-                style = Immersive.Caption.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                color = tint.copy(alpha = 0.90f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        // Layout Preset Selector Button (Minimum 48dp hit target, clear focus & hover)
-        Box {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(tint.copy(alpha = 0.14f))
-                    .desktopClickable(minTargetSize = 48.dp, hoverHighlight = true, shape = RoundedCornerShape(10.dp)) {
-                        showPresetMenu = true
-                        onMenuStateChange(true)
-                    }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = when (currentPreset) {
-                        TvModePref.LAYOUT_CINEMA -> Icons.Rounded.Movie
-                        TvModePref.LAYOUT_LYRICS -> Icons.Rounded.Lyrics
-                        TvModePref.LAYOUT_MINIMAL -> Icons.Rounded.Tune
-                        else -> Icons.Rounded.Dashboard
-                    },
-                    contentDescription = null,
-                    tint = tint,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = when (currentPreset) {
-                        TvModePref.LAYOUT_CINEMA -> "CINEMA"
-                        TvModePref.LAYOUT_LYRICS -> "LYRICS"
-                        TvModePref.LAYOUT_MINIMAL -> "MINIMAL"
-                        else -> "BALANCED"
-                    },
-                    style = Immersive.Caption.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
-                    color = tint,
-                )
-            }
-
-            DropdownMenu(
-                expanded = showPresetMenu,
-                onDismissRequest = {
-                    showPresetMenu = false
-                    onMenuStateChange(false)
-                },
-                modifier = Modifier
-                    .background(Color(0xFF1A1A1E))
-                    .border(1.dp, tint.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
-            ) {
-                DropdownMenuItem(
-                    text = { Text("Balanced Mode (Two-panel)", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.Dashboard, null, tint = tint) },
-                    onClick = {
-                        onSelectPreset(TvModePref.LAYOUT_BALANCED)
-                        showPresetMenu = false
-                        onMenuStateChange(false)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Cinema Mode (Full Video)", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.Movie, null, tint = tint) },
-                    onClick = {
-                        onSelectPreset(TvModePref.LAYOUT_CINEMA)
-                        showPresetMenu = false
-                        onMenuStateChange(false)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Lyrics Mode (Focus)", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.Lyrics, null, tint = tint) },
-                    onClick = {
-                        onSelectPreset(TvModePref.LAYOUT_LYRICS)
-                        showPresetMenu = false
-                        onMenuStateChange(false)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Minimal Mode (Art only)", color = Color.White) },
-                    leadingIcon = { Icon(Icons.Rounded.Tune, null, tint = tint) },
-                    onClick = {
-                        onSelectPreset(TvModePref.LAYOUT_MINIMAL)
-                        showPresetMenu = false
-                        onMenuStateChange(false)
-                    },
-                )
-            }
-        }
-
-        Spacer(Modifier.width(12.dp))
-
-        // Sound source quality badge
-        val sourceLabel = com.music.spotui.ui.components.playingSourceLabel()
-        if (sourceLabel.isNotBlank() && !state.adPlaying) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(tint.copy(alpha = 0.14f))
-                    .desktopClickable(minTargetSize = 48.dp, hoverHighlight = true, shape = RoundedCornerShape(8.dp), onClick = onSource)
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = sourceLabel,
-                    style = Immersive.Caption.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
-                    color = tint.copy(alpha = 0.85f),
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-        }
-
-        // Music Video toggle button
-        if (videoReady || videoOn) {
+            // 1. Queue Toggle Button
             TvCircleGlyph(
-                icon = Icons.Default.OndemandVideo,
-                contentDescription = stringResource(R.string.av_content_desc),
+                icon = Icons.AutoMirrored.Rounded.QueueMusic,
+                contentDescription = "Queue",
+                onClick = { onSelectTab(if (rightTab == WidescreenRightTab.QUEUE) WidescreenRightTab.LYRICS else WidescreenRightTab.QUEUE) },
+                active = rightTab == WidescreenRightTab.QUEUE,
+                size = 38.dp,
+                iconSize = 18.dp,
+            )
+
+            // 2. Video Toggle Button
+            TvCircleGlyph(
+                icon = Icons.Rounded.Videocam,
+                contentDescription = "Video",
                 onClick = onToggleVideo,
                 active = videoOn,
-                size = 48.dp,
+                size = 38.dp,
+                iconSize = 18.dp,
             )
-            Spacer(Modifier.width(10.dp))
-        }
 
-        // More options menu
-        if (onMore != null) {
+            // 3. Preset Selector Button
+            Box {
+                TvCircleGlyph(
+                    icon = Icons.Rounded.Dashboard,
+                    contentDescription = "Presets",
+                    onClick = {
+                        showPresetMenu = true
+                        onMenuStateChange(true)
+                    },
+                    active = currentPreset == TvModePref.LAYOUT_BALANCED,
+                    size = 38.dp,
+                    iconSize = 18.dp,
+                )
+
+                DropdownMenu(
+                    expanded = showPresetMenu,
+                    onDismissRequest = {
+                        showPresetMenu = false
+                        onMenuStateChange(false)
+                    },
+                    modifier = Modifier
+                        .background(Color(0xFF1A1A1E))
+                        .border(1.dp, tint.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Balanced Mode (Two-panel)", color = Color.White) },
+                        leadingIcon = { Icon(Icons.Rounded.Dashboard, null, tint = tint) },
+                        onClick = {
+                            onSelectPreset(TvModePref.LAYOUT_BALANCED)
+                            showPresetMenu = false
+                            onMenuStateChange(false)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Cinema Mode (Full Video)", color = Color.White) },
+                        leadingIcon = { Icon(Icons.Rounded.Movie, null, tint = tint) },
+                        onClick = {
+                            onSelectPreset(TvModePref.LAYOUT_CINEMA)
+                            showPresetMenu = false
+                            onMenuStateChange(false)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Lyrics Mode (Focus)", color = Color.White) },
+                        leadingIcon = { Icon(Icons.Rounded.Lyrics, null, tint = tint) },
+                        onClick = {
+                            onSelectPreset(TvModePref.LAYOUT_LYRICS)
+                            showPresetMenu = false
+                            onMenuStateChange(false)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Minimal Mode (Art only)", color = Color.White) },
+                        leadingIcon = { Icon(Icons.Rounded.Tune, null, tint = tint) },
+                        onClick = {
+                            onSelectPreset(TvModePref.LAYOUT_MINIMAL)
+                            showPresetMenu = false
+                            onMenuStateChange(false)
+                        },
+                    )
+                }
+            }
+
+            // 4. Lyrics View Button
             TvCircleGlyph(
-                icon = Icons.Rounded.MoreHoriz,
-                contentDescription = stringResource(R.string.immersive_player_more),
-                onClick = onMore,
-                size = 48.dp,
+                icon = Icons.Rounded.Lyrics,
+                contentDescription = "Lyrics",
+                onClick = { onSelectTab(WidescreenRightTab.LYRICS) },
+                active = rightTab == WidescreenRightTab.LYRICS,
+                size = 38.dp,
+                iconSize = 18.dp,
             )
-            Spacer(Modifier.width(10.dp))
+
+            // 5. Settings / More Options Button
+            if (onMore != null) {
+                TvCircleGlyph(
+                    icon = Icons.Rounded.Settings,
+                    contentDescription = stringResource(R.string.immersive_player_more),
+                    onClick = onMore,
+                    size = 38.dp,
+                    iconSize = 18.dp,
+                )
+            }
+
+            // 6. Close Button
+            TvCircleGlyph(
+                icon = Icons.Filled.Close,
+                contentDescription = stringResource(R.string.immersive_player_close),
+                onClick = onClose,
+                size = 38.dp,
+                iconSize = 18.dp,
+            )
         }
 
-        // Desktop close button
-        TvCircleGlyph(
-            icon = Icons.Filled.Close,
-            contentDescription = stringResource(R.string.immersive_player_close),
-            onClick = onClose,
-            size = 48.dp,
-        )
+        // Top-Right Context / Source Quality Info
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val contextName = state.contextName.ifEmpty {
+                if (state.album.isNotBlank()) state.album else state.title
+            }
+            if (contextName.isNotBlank()) {
+                Text(
+                    text = contextName,
+                    style = Immersive.Caption.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+                    color = Color.White.copy(alpha = 0.85f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            val sourceLabel = com.music.spotui.ui.components.playingSourceLabel()
+            if (sourceLabel.isNotBlank() && !state.adPlaying) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.14f))
+                        .desktopClickable(minTargetSize = 40.dp, hoverHighlight = true, shape = RoundedCornerShape(8.dp), onClick = onSource)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = sourceLabel,
+                        style = Immersive.Caption.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                        color = Color.White.copy(alpha = 0.85f),
+                    )
+                }
+            }
+        }
     }
 }
 
 /**
- * PRESET 1: BALANCED (Default Two-Panel layout).
+ * Custom scrubber for Balanced Preset displaying exact elapsed time (left) and total duration (right)
+ * without negative signs, matching the reference image specification.
  */
+@Composable
+private fun BalancedScrubber(
+    state: ImmersivePlayerState,
+    onSeek: (Long) -> Unit,
+) {
+    val scrub = rememberPlayerScrub(state.title, state.positionMs, state.durationMs)
+    val frame = rememberFrameClock(state.playing && !state.buffering, fps = 15)
+    Column(Modifier.fillMaxWidth()) {
+        ThinSlider(
+            value = { frame.value; scrub.shown(state.positionMs(), state.durationMs) },
+            onValueChange = scrub::drag,
+            onValueChangeFinished = { scrub.release { onSeek((it * state.durationMs).toLong()) } },
+            loading = state.buffering && !scrub.scrubbing,
+            activeColor = Color.White,
+            inactiveColor = Color.White.copy(alpha = 0.25f),
+            idleHeight = 4.dp,
+            activeHeight = 7.dp,
+        )
+        frame.value
+        val shown = scrub.shown(state.positionMs(), state.durationMs)
+        val duration = state.durationMs.coerceAtLeast(0L)
+        val elapsed = (shown * duration).toLong()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(y = (-6).dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = formatTime(elapsed),
+                style = Immersive.Caption.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium),
+                color = Color.White.copy(alpha = 0.70f),
+            )
+            Text(
+                text = formatTime(duration),
+                style = Immersive.Caption.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium),
+                color = Color.White.copy(alpha = 0.70f),
+            )
+        }
+    }
+}
+
+/**
+ * PRESET 1: BALANCED (Redesigned Cinematic Split-Screen Layout matching reference image).
+ * Left (~43%): Media Canvas/Video with Bottom-Left Song Details, Progress Bar & Playback Controls.
+ * Right (~57%): Full-Height Synchronized Live Lyrics with bold active line and subtle glow.
+ */
+@OptIn(ExperimentalGlideComposeApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun BalancedPreset(
     state: ImmersivePlayerState,
@@ -702,38 +762,327 @@ private fun BalancedPreset(
     onCanvasFirstFrame: () -> Unit,
     videoOn: Boolean,
     pauseScale: State<Float>,
+    volume: PlayerVolume,
     rightTab: Int,
     onSelectTab: (Int) -> Unit,
+    onOpenPresets: () -> Unit = {},
+    onMore: (() -> Unit)? = null,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(32.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        WidescreenCinematicPanel(
-            state = state,
-            actions = actions,
-            tint = tint,
-            canvasUrl = canvasUrl,
-            canvasReady = canvasReady,
-            onCanvasFirstFrame = onCanvasFirstFrame,
-            videoOn = videoOn,
-            pauseScale = pauseScale,
-            modifier = Modifier
-                .weight(1.15f)
-                .fillMaxHeight(),
+    val artworkColors = rememberArtworkColors(state.coverUrl)
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        // Spicy Lyrics Ambient Mesh Gradient Backdrop
+        MeshGradientBackground(
+            palette = artworkColors,
+            trackKey = state.coverUrl,
+            modifier = Modifier.fillMaxSize(),
         )
-        WidescreenRightPanel(
-            state = state,
-            tint = tint,
-            currentTab = rightTab,
-            onSelectTab = onSelectTab,
+        Box(
             modifier = Modifier
-                .weight(0.95f)
-                .fillMaxHeight(),
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f)),
         )
+
+        val isCompact = maxHeight < 480.dp
+        val titleFont = if (isCompact) 24.sp else 32.sp
+        val artistFont = if (isCompact) 15.sp else 20.sp
+        val itemGap = if (isCompact) 6.dp else 12.dp
+        val btnSize = if (isCompact) 38.dp else 44.dp
+        val prevNextSize = if (isCompact) 40.dp else 48.dp
+        val playBtnSize = if (isCompact) 44.dp else 52.dp
+
+        val canvasAlpha by animateFloatAsState(
+            targetValue = if (canvasReady) 1f else 0f,
+            animationSpec = tween(400, easing = FastOutSlowInEasing),
+            label = "balancedCanvasFade",
+        )
+
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // ── LEFT COLUMN (~50% width): Edge-to-Edge Full-Height Media Canvas with Smooth Crossfade & Overlaid UI ──
+            Box(
+                modifier = Modifier
+                    .weight(1.08f)
+                    .fillMaxHeight(),
+            ) {
+                Crossfade(
+                    targetState = state.trackId.ifBlank { state.coverUrl },
+                    animationSpec = tween(400, easing = FastOutSlowInEasing),
+                    modifier = Modifier.fillMaxSize(),
+                    label = "balancedMediaCrossfade",
+                ) { _ ->
+                    Box(Modifier.fillMaxSize()) {
+                        when {
+                            videoOn -> {
+                                Box(Modifier.fillMaxSize()) {
+                                    com.music.spotui.ui.components.VideoSurface(
+                                        modifier = Modifier.fillMaxSize(),
+                                        active = true,
+                                        onTap = { },
+                                    )
+                                }
+                            }
+                            canvasUrl != null -> {
+                                Box(Modifier.fillMaxSize()) {
+                                    GlideImage(
+                                        model = state.coverUrl.takeIf { it.isNotBlank() },
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        transition = CrossFade,
+                                        modifier = Modifier.fillMaxSize(),
+                                        requestBuilderTransform = { it.override(COVER_DECODE_PX) },
+                                    )
+                                    com.music.spotui.ui.screens.CanvasVideo(
+                                        url = canvasUrl,
+                                        onFirstFrame = onCanvasFirstFrame,
+                                        playing = state.playing && !state.buffering,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .graphicsLayer { alpha = canvasAlpha },
+                                    )
+                                    SongBlendCover(state.blend, Modifier.fillMaxSize()) { it.override(COVER_DECODE_PX) }
+                                }
+                            }
+                            else -> {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    GlideImage(
+                                        model = state.coverUrl.takeIf { it.isNotBlank() },
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize(),
+                                        requestBuilderTransform = { it.override(COVER_DECODE_PX) },
+                                    )
+                                    SongBlendCover(state.blend, Modifier.fillMaxSize()) { it.override(COVER_DECODE_PX) }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. Dark Vertical Gradient Scrim over the full-height Canvas/Video so overlaid UI stays crisp
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.35f),
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.45f),
+                                    Color.Black.copy(alpha = 0.90f),
+                                ),
+                            ),
+                        ),
+                )
+
+                // 3. Top-Left Floating Action Buttons Row over Video/Canvas
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 16.dp, top = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TvCircleGlyph(
+                        icon = Icons.AutoMirrored.Rounded.QueueMusic,
+                        contentDescription = "Queue",
+                        onClick = { onSelectTab(if (rightTab == WidescreenRightTab.QUEUE) WidescreenRightTab.LYRICS else WidescreenRightTab.QUEUE) },
+                        active = rightTab == WidescreenRightTab.QUEUE,
+                        size = 36.dp,
+                        iconSize = 18.dp,
+                    )
+                    TvCircleGlyph(
+                        icon = Icons.Rounded.Videocam,
+                        contentDescription = "Video",
+                        onClick = { com.music.spotui.video.MusicVideoController.handleShortClick() },
+                        active = videoOn,
+                        size = 36.dp,
+                        iconSize = 18.dp,
+                    )
+                    TvCircleGlyph(
+                        icon = Icons.Rounded.Dashboard,
+                        contentDescription = "Presets",
+                        onClick = onOpenPresets,
+                        active = true,
+                        size = 36.dp,
+                        iconSize = 18.dp,
+                    )
+                    TvCircleGlyph(
+                        icon = Icons.Rounded.Lyrics,
+                        contentDescription = "Lyrics",
+                        onClick = { onSelectTab(WidescreenRightTab.LYRICS) },
+                        active = rightTab == WidescreenRightTab.LYRICS,
+                        size = 36.dp,
+                        iconSize = 18.dp,
+                    )
+                    if (onMore != null) {
+                        TvCircleGlyph(
+                            icon = Icons.Rounded.Settings,
+                            contentDescription = stringResource(R.string.immersive_player_more),
+                            onClick = onMore,
+                            size = 36.dp,
+                            iconSize = 18.dp,
+                        )
+                    }
+                    TvCircleGlyph(
+                        icon = Icons.Filled.Close,
+                        contentDescription = stringResource(R.string.immersive_player_close),
+                        onClick = actions.close,
+                        size = 36.dp,
+                        iconSize = 18.dp,
+                    )
+                }
+
+                // 4. Bottom-Left Overlaid Track Title, Artist, Scrubber & Playback Controls
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                ) {
+                    // Track Title
+                    Text(
+                        text = if (state.adPlaying) stringResource(R.string.immersive_player_ad) else state.title,
+                        style = Immersive.Title.copy(fontSize = titleFont, fontWeight = FontWeight.Bold),
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    // Artist Name
+                    Text(
+                        text = state.artist,
+                        style = Immersive.Caption.copy(fontSize = artistFont, fontWeight = FontWeight.Medium),
+                        color = Color.White.copy(alpha = 0.80f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Spacer(Modifier.height(itemGap))
+
+                    // Scrubber Bar
+                    BalancedScrubber(state = state, onSeek = actions.seekTo)
+
+                    Spacer(Modifier.height(if (isCompact) 4.dp else 8.dp))
+
+                    // Playback Controls Row (Heart, Shuffle, Prev, Play/Pause, Next, Repeat, Volume)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        // Heart / Like Button (REAL Heart Icon)
+                        DesktopControlIcon(
+                            icon = if (state.liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                            contentDescription = stringResource(if (state.liked) R.string.immersive_player_unlike else R.string.immersive_player_like),
+                            tint = if (state.liked) Color(0xFFFF4D6D) else Color.White.copy(alpha = 0.85f),
+                            active = state.liked,
+                            activeColor = Color(0xFFFF4D6D),
+                            onClick = actions.toggleLike,
+                            targetSize = btnSize,
+                            size = if (isCompact) 20.dp else 22.dp,
+                        )
+
+                        // Shuffle
+                        DesktopControlIcon(
+                            icon = if (state.smart) Icons.Rounded.AutoAwesome else Icons.Rounded.Shuffle,
+                            contentDescription = "Shuffle",
+                            tint = if (state.shuffle || state.smart) tint else Color.White.copy(alpha = 0.55f),
+                            active = state.shuffle || state.smart,
+                            activeColor = tint,
+                            targetSize = btnSize,
+                            size = if (isCompact) 18.dp else 20.dp,
+                            onClick = actions.toggleShuffle,
+                        )
+
+                        // Previous
+                        DesktopControlIcon(
+                            icon = Icons.Rounded.SkipPrevious,
+                            contentDescription = stringResource(R.string.immersive_player_previous),
+                            tint = Color.White,
+                            targetSize = prevNextSize,
+                            size = if (isCompact) 22.dp else 24.dp,
+                            onClick = actions.previous,
+                        )
+
+                        // Play / Pause (Prominent Central Button)
+                        DesktopControlIcon(
+                            icon = if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = stringResource(if (state.playing) R.string.immersive_player_pause else R.string.immersive_player_play),
+                            tint = Color.Black,
+                            active = true,
+                            activeColor = Color.White,
+                            targetSize = playBtnSize,
+                            size = if (isCompact) 24.dp else 28.dp,
+                            onClick = actions.playPause,
+                        )
+
+                        // Next
+                        DesktopControlIcon(
+                            icon = Icons.Rounded.SkipNext,
+                            contentDescription = stringResource(R.string.immersive_player_next),
+                            tint = Color.White,
+                            targetSize = prevNextSize,
+                            size = if (isCompact) 22.dp else 24.dp,
+                            onClick = actions.next,
+                        )
+
+                        // Repeat
+                        DesktopControlIcon(
+                            icon = if (state.repeatMode == ImmersiveRepeat.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                            contentDescription = "Repeat",
+                            tint = if (state.repeatMode != ImmersiveRepeat.OFF) tint else Color.White.copy(alpha = 0.55f),
+                            active = state.repeatMode != ImmersiveRepeat.OFF,
+                            activeColor = tint,
+                            targetSize = btnSize,
+                            size = if (isCompact) 18.dp else 20.dp,
+                            onClick = actions.cycleRepeat,
+                        )
+
+                        // Volume
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.VolumeDown,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(if (isCompact) 16.dp else 18.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            ThinSlider(
+                                value = volume.level.value,
+                                onValueChange = volume::drag,
+                                onValueChangeFinished = volume::release,
+                                idleHeight = 5.dp,
+                                activeHeight = 8.dp,
+                                modifier = Modifier.width(if (isCompact) 60.dp else 76.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── RIGHT COLUMN (~50% width): Full-Height Synchronized Live Lyrics / Queue ──
+            Box(
+                modifier = Modifier
+                    .weight(1.0f)
+                    .fillMaxHeight(),
+            ) {
+                if (rightTab == WidescreenRightTab.LYRICS) {
+                    ImmersiveLyricsPanel(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                } else {
+                    ImmersiveQueuePanel(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                }
+            }
+        }
     }
 }
 

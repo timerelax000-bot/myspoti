@@ -57,15 +57,22 @@ import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.CenterFocusWeak
+import androidx.compose.material.icons.rounded.Tune
+import com.music.spotui.data.preferences.ImmersiveSettingsPref
+import com.music.spotui.ui.navigation.Routes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.OndemandVideo
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -218,6 +225,12 @@ fun ImmersivePlayer(
 
     val context = LocalContext.current
     val palette = rememberArtworkColors(state.coverUrl.takeIf { it.isNotBlank() })
+    val animatedArtwork by ImmersiveSettingsPref.animatedArtworkEnabled.collectAsStateWithLifecycle()
+    val gestureControls by ImmersiveSettingsPref.gestureControlsEnabled.collectAsStateWithLifecycle()
+    val visualizerOn by ImmersiveSettingsPref.visualizerEnabled.collectAsStateWithLifecycle()
+    val visualizerIntensity by ImmersiveSettingsPref.visualizerIntensity.collectAsStateWithLifecycle()
+    val reduceMotion = com.music.spotui.ui.look.rememberReduceMotion()
+
     // A crossfade: the colours of the song going out, as they were when it began (the new cover's
     // own come once it is loaded, and rememberArtworkColors keeps the old ones until then).
     val blend = state.blend
@@ -307,13 +320,23 @@ fun ImmersivePlayer(
         val window = com.music.spotui.ui.components.windowSize()
         val landscape = maxWidth > maxHeight || window.twoPane
         val sidePane = window.large && maxWidth >= SIDE_PANE_MIN_WIDTH
-        // Widescreen / TV mode for Honor MagicOS Desktop Mode, DeX, and large resizable desktop windows.
-        // Requires desktop-grade dimensions (>= 960dp width, >= 480dp height) and landscape aspect ratio.
-        val isWidescreenTv = maxWidth >= WIDESCREEN_TV_MIN_WIDTH &&
-            maxHeight >= WIDESCREEN_TV_MIN_HEIGHT &&
-            maxWidth > maxHeight * 1.15f
+        val isTv = remember { com.music.spotui.tv.TvDetect.isTv(context) }
+        val isWidescreenTv = isTv || landscape
 
-        PlayerBackdrop(palette, outgoingPalette, blend, state.coverUrl)
+        val displayState = when {
+            isWidescreenTv -> com.music.spotui.ui.look.ImmersiveDisplayState.TV
+            else -> com.music.spotui.ui.look.ImmersiveDisplayState.PORTRAIT
+        }
+
+        PlayerBackdrop(
+            palette = palette,
+            outgoing = outgoingPalette,
+            blend = blend,
+            trackKey = state.coverUrl,
+            videoActive = videoOn,
+            videoUrl = readyVideo?.videoUrl,
+            displayState = displayState,
+        )
         if (canvasUrl != null && !videoOn && !isWidescreenTv) {
             com.music.spotui.ui.screens.CanvasVideo(
                 url = canvasUrl,
@@ -355,6 +378,12 @@ fun ImmersivePlayer(
                 panel = panel,
                 pauseScale = pauseScale,
                 volume = volume,
+                palette = palette,
+                animatedArtwork = animatedArtwork,
+                gestureControls = gestureControls,
+                visualizerOn = visualizerOn,
+                visualizerIntensity = visualizerIntensity,
+                reduceMotion = reduceMotion,
                 onToggleLyrics = { panel = if (lyricsOpen) Panel.NONE else Panel.LYRICS },
                 onToggleQueue = { panel = if (queueOpen) Panel.NONE else Panel.QUEUE },
                 onOpenDevices = { showDevices = true },
@@ -415,6 +444,25 @@ fun ImmersivePlayer(
                         }
                     }
 
+                    // ---- Immersive Visualizer behind Artwork ----
+                    if (panel == Panel.NONE && !videoOn) {
+                        ImmersiveVisualizer(
+                            enabled = visualizerOn,
+                            playing = state.playing,
+                            intensity = visualizerIntensity,
+                            palette = palette,
+                            reducedMotion = reduceMotion,
+                            canvasActive = canvasOn,
+                            modifier = Modifier
+                                .offset { IntOffset(artStart().roundToPx(), artTop().roundToPx()) }
+                                .layout { measurable, _ ->
+                                    val side = artSize().roundToPx()
+                                    val placeable = measurable.measure(Constraints.fixed(side, side))
+                                    layout(side, side) { placeable.place(0, 0) }
+                                },
+                        )
+                    }
+
                     // ---- The cover: the whole sleeve, then the header's thumbnail ----
                     Box(
                         modifier = Modifier
@@ -438,10 +486,7 @@ fun ImmersivePlayer(
                                 clip = true
                             }
                             .background(Color.Black.copy(alpha = 0.18f))
-                            .dragToClose()
-                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                                if (panel != Panel.NONE) panel = Panel.NONE
-                            },
+                            .dragToClose(),
                     ) {
                         if (videoOn) {
                             Box(Modifier.fillMaxSize()) {
@@ -454,25 +499,30 @@ fun ImmersivePlayer(
                                     Modifier.align(Alignment.BottomEnd).padding(4.dp),
                                 )
                                 if (com.music.spotui.video.MusicVideoController.fullscreen.value) {
-                                    com.music.spotui.ui.components.VideoFullscreenOverlay()
+                                    com.music.spotui.video.MusicVideoController.fullscreen.value.let { }
                                 }
                             }
                         } else {
-                            GlideImage(
-                                model = state.coverUrl.takeIf { it.isNotBlank() },
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                transition = CrossFade,
-                                loading = placeholder(R.drawable.placeholder),
-                                failure = placeholder(R.drawable.placeholder),
+                            AnimatedArtworkContainer(
+                                state = state,
+                                blend = blend,
+                                isPlaying = state.playing,
+                                animatedArtworkEnabled = animatedArtwork,
+                                reducedMotion = reduceMotion,
+                                canvasActive = canvasOn,
                                 modifier = Modifier.fillMaxSize(),
-                                // The box shrinks to the 60dp header thumbnail and grows back: Glide sizes the
-                                // request from the constraints it first sees, so without a fixed size a cover
-                                // first measured (or reloaded) while collapsed stays a small bitmap.
-                                requestBuilderTransform = { it.override(COVER_DECODE_PX) },
                             )
-                            SongBlendCover(blend, Modifier.fillMaxSize()) { it.override(COVER_DECODE_PX) }
                         }
+
+                        ArtworkGestureOverlay(
+                            enabled = gestureControls && !videoOn,
+                            onSwipeNext = { actions.next() },
+                            onSwipePrevious = { actions.previous() },
+                            onDoubleTap = { actions.toggleLike() },
+                            onLongPress = { if (navController != null && state.song != null) showMenu = true },
+                            onSingleTap = { if (panel != Panel.NONE) panel = Panel.NONE },
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
 
                     // ---- Title + round glyphs ----
@@ -579,16 +629,25 @@ private fun rememberImmersiveCanvas(state: ImmersivePlayerState): String? {
     val context = LocalContext.current
     val vm: com.music.spotui.ui.viewmodel.PlayerViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val energy by app.myspoti.power.EnergySettings.state.collectAsStateWithLifecycle()
+    val saverActive by com.music.spotui.data.CanvasNetworkPolicy.policyState.collectAsStateWithLifecycle()
+    val limit by ImmersiveSettingsPref.canvasQualityLimit.collectAsStateWithLifecycle()
+
     val allowed = energy.policy.allowCanvas && !com.music.spotui.data.DataSaver.active &&
-        !(com.music.spotui.data.DataSaver.metered && com.music.spotui.data.preferences.isCanvasWifiOnly(context))
+        !(com.music.spotui.data.DataSaver.metered && com.music.spotui.data.preferences.isCanvasWifiOnly(context)) &&
+        limit != "artwork_only"
+
     val trackId = state.trackId
-    LaunchedEffect(trackId, allowed, state.buffering) {
+    LaunchedEffect(trackId, allowed, state.buffering, saverActive, limit) {
         vm.loadCanvas(if (allowed) trackId else "", allowFetch = !state.buffering)
     }
     val canvas = vm.canvasState.value
-    // Known already (looked up when the song started): this very frame, not one later.
     val known = remember(trackId) { com.music.spotui.di.Graph.api.knownCanvas(trackId)?.getOrNull() }
-    return (if (canvas.trackId == trackId) canvas.url else known).takeIf { allowed && trackId.isNotBlank() && !state.adPlaying }
+    val candidateUrl = if (canvas.trackId == trackId) canvas.url else known
+
+    return candidateUrl.takeIf { url ->
+        allowed && trackId.isNotBlank() && !state.adPlaying &&
+        com.music.spotui.data.CanvasNetworkPolicy.isCanvasAllowed(context, url)
+    }
 }
 
 /**
@@ -596,12 +655,26 @@ private fun rememberImmersiveCanvas(state: ImmersivePlayerState): String? {
  * the fade's progress, read here so only the backdrop follows it frame by frame, not the player.
  */
 @Composable
-private fun PlayerBackdrop(palette: MeshPalette, outgoing: MeshPalette, blend: SongBlend?, trackKey: String) {
-    MeshGradientBackground(
-        palette = if (blend == null) palette else lerp(outgoing, palette, blend.progress()),
+private fun PlayerBackdrop(
+    palette: MeshPalette,
+    outgoing: MeshPalette,
+    blend: SongBlend?,
+    trackKey: String,
+    videoActive: Boolean = false,
+    videoUrl: String? = null,
+    displayState: com.music.spotui.ui.look.ImmersiveDisplayState = com.music.spotui.ui.look.ImmersiveDisplayState.PORTRAIT,
+) {
+    val dynamic = com.music.spotui.ui.look.DynamicBackgroundController.rememberPalette(
+        coverUrl = trackKey,
+        videoUrl = videoUrl,
+        videoActive = videoActive,
+        displayState = displayState,
         trackKey = trackKey,
-        // Following the fade, a short smoothing only: the new cover's colours, known a moment
-        // into it, do not jump in.
+    )
+    val mesh = dynamic.toMeshPalette()
+    MeshGradientBackground(
+        palette = if (blend == null) mesh else lerp(outgoing, mesh, blend.progress()),
+        trackKey = trackKey,
         colorFadeMillis = if (blend == null) 1400 else 250,
     )
 }
@@ -704,24 +777,17 @@ private fun RowScope.PlayerCredits(
         )
     }
     val mv = com.music.spotui.video.MusicVideoController
-    val videoState = mv.state.value
-    val readyVideo = videoState as? com.music.spotui.video.MusicVideoController.State.Ready
-    val remote = com.music.spotui.di.SongPlayer.activeDevice.value != null
-    val videoMatchesTrack = state.trackId.isNotBlank() && readyVideo?.trackId == state.trackId
-    val videoReady = videoMatchesTrack && !remote && !state.buffering && !com.music.spotui.data.DataSaver.active &&
-            com.music.spotui.data.preferences.MusicVideoPref.on
-    val videoOn = mv.on.value && videoMatchesTrack && !remote && com.music.spotui.data.preferences.MusicVideoPref.on
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val videoOn = mv.on.value
 
-    if (videoReady || videoOn) {
-        Spacer(Modifier.width(10.dp))
-        CircleGlyph(
-            icon = androidx.compose.material.icons.Icons.Default.OndemandVideo,
-            contentDescription = stringResource(R.string.av_content_desc),
-            onClick = { mv.setOn(!videoOn) },
-            active = videoOn,
-        )
-    }
     if (onMore != null) {
+        Spacer(Modifier.width(8.dp))
+        LongPressVideoButton(
+            videoOn = videoOn,
+            videoAudioActive = mv.isVideoAudioActive,
+            onShortClick = { mv.handleShortClick() },
+            onLongPressComplete = { mv.handleLongPress(context) },
+        )
         Spacer(Modifier.width(8.dp))
         CircleGlyph(
             icon = Icons.Rounded.MoreHoriz,
@@ -793,6 +859,12 @@ private fun LandscapePlayer(
     panel: Int,
     pauseScale: State<Float>,
     volume: PlayerVolume,
+    palette: MeshPalette,
+    animatedArtwork: Boolean,
+    gestureControls: Boolean,
+    visualizerOn: Boolean,
+    visualizerIntensity: String,
+    reduceMotion: Boolean,
     onToggleLyrics: () -> Unit,
     onToggleQueue: () -> Unit,
     onOpenDevices: () -> Unit,
@@ -828,6 +900,17 @@ private fun LandscapePlayer(
                         Panel.LYRICS -> ImmersiveLyricsPanel(Modifier.fillMaxSize(), PaddingValues(vertical = 4.dp))
                         Panel.QUEUE -> ImmersiveQueuePanel(Modifier.fillMaxSize(), PaddingValues(vertical = 4.dp))
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            if (visualizerOn && !videoOn) {
+                                ImmersiveVisualizer(
+                                    enabled = visualizerOn,
+                                    playing = state.playing,
+                                    intensity = visualizerIntensity,
+                                    palette = palette,
+                                    reducedMotion = reduceMotion,
+                                    canvasActive = false,
+                                    modifier = Modifier.size(side),
+                                )
+                            }
                             Box(
                                 Modifier
                                     .size(side)
@@ -854,18 +937,26 @@ private fun LandscapePlayer(
                                         )
                                     }
                                 } else {
-                                    GlideImage(
-                                        model = state.coverUrl.takeIf { it.isNotBlank() },
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        transition = CrossFade,
-                                        loading = placeholder(R.drawable.placeholder),
-                                        failure = placeholder(R.drawable.placeholder),
+                                    AnimatedArtworkContainer(
+                                        state = state,
+                                        blend = state.blend,
+                                        isPlaying = state.playing,
+                                        animatedArtworkEnabled = animatedArtwork,
+                                        reducedMotion = reduceMotion,
+                                        canvasActive = false,
                                         modifier = Modifier.fillMaxSize(),
-                                        requestBuilderTransform = { it.override(COVER_DECODE_PX) },
                                     )
-                                    SongBlendCover(state.blend, Modifier.fillMaxSize()) { it.override(COVER_DECODE_PX) }
                                 }
+
+                                ArtworkGestureOverlay(
+                                    enabled = gestureControls && !videoOn,
+                                    onSwipeNext = { actions.next() },
+                                    onSwipePrevious = { actions.previous() },
+                                    onDoubleTap = { actions.toggleLike() },
+                                    onLongPress = { onMore?.invoke() },
+                                    onSingleTap = { },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                             }
                         }
                     }
@@ -908,5 +999,5 @@ private val LANDSCAPE_VOLUME_MIN_HEIGHT = 400.dp
 /** Minimum width to activate the premium TV / Widescreen two-panel layout. */
 private val WIDESCREEN_TV_MIN_WIDTH = 960.dp
 
-/** Minimum height to activate the premium TV / Widescreen two-panel layout (excludes compact phone landscape). */
-private val WIDESCREEN_TV_MIN_HEIGHT = 480.dp
+/** Minimum height to activate the premium TV / Widescreen two-panel layout. */
+private val WIDESCREEN_TV_MIN_HEIGHT = 360.dp

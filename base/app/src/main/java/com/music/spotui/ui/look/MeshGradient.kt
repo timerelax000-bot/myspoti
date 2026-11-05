@@ -94,7 +94,7 @@ fun MeshGradientBackground(
      * Keep the blobs orbiting instead of letting them settle. Off wherever the
      * mesh fills a screen, for the reason in the note above.
      */
-    continuous: Boolean = false,
+    continuous: Boolean = true,
     /**
      * How far the blobs are smeared. The default is sized for a full screen;
      * a small surface needs proportionally less, or the four colours blend into

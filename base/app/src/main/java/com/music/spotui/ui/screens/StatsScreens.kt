@@ -28,6 +28,15 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.QueueMusic
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -39,6 +48,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -58,6 +68,7 @@ import app.myspoti.api.TimeRange
 import app.myspoti.api.TopContent
 import app.myspoti.api.best
 import app.myspoti.engine.R
+import kotlinx.coroutines.launch
 import app.myspoti.host.android.MyspotiRuntime
 import com.bumptech.glide.integration.compose.CrossFade
 import com.bumptech.glide.integration.compose.ExperimentalGlideComposeApi
@@ -256,10 +267,13 @@ fun ArtistTopBadge(artistId: String, modifier: Modifier = Modifier) {
     }
 }
 
+@Composable
+fun FriendsScreen(navController: NavController) = FriendActivityScreen(navController)
+
 /**
  * Friend activity, as the official feed shows it: each followed person sharing their listening,
- * their latest track and where it was played from, "Now" for the past 15 minutes. Tapping the
- * person opens their profile, tapping the row plays the track in its context.
+ * their latest track and where it was played from, separated into "Listening Now" and "Recently Active".
+ * Tapping the person opens their profile, tapping the row plays the track in its context.
  */
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
@@ -290,7 +304,36 @@ fun FriendActivityScreen(navController: NavController) {
                 friends.isEmpty() -> item {
                     Text(stringResource(R.string.friends_empty), color = StatsSubtle, fontSize = 14.sp, modifier = Modifier.padding(16.dp))
                 }
-                else -> items(friends, key = { it.user.uri }) { f -> FriendRow(f, now, navController) }
+                else -> {
+                    val listeningNow = friends.filter { it.isNowPlaying(now) }
+                    val recentlyActive = friends.filterNot { it.isNowPlaying(now) }
+
+                    if (listeningNow.isNotEmpty()) {
+                        item {
+                            Text(
+                                "Listening Now",
+                                color = AppAccent,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+                        items(listeningNow, key = { it.user.uri }) { f -> FriendRow(f, now, navController) }
+                    }
+
+                    if (recentlyActive.isNotEmpty()) {
+                        item {
+                            Text(
+                                "Recently Active",
+                                color = StatsSubtle,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+                        items(recentlyActive, key = { it.user.uri }) { f -> FriendRow(f, now, navController) }
+                    }
+                }
             }
         }
     }
@@ -301,6 +344,8 @@ fun FriendActivityScreen(navController: NavController) {
 private fun FriendRow(f: FriendActivity, now: Long, navController: NavController) {
     val track = f.track
     val openProfile = { navController.navigate(profileRoute(f.user.uri.substringAfterLast(':'), f.user.name)) }
+    var menuOpen by remember { mutableStateOf(false) }
+
     Row(
         verticalAlignment = Alignment.Top,
         modifier = Modifier.fillMaxWidth()
@@ -341,6 +386,74 @@ private fun FriendRow(f: FriendActivity, now: Long, navController: NavController
         f.trackImageUrl?.let { cover ->
             GlideImage(transition = CrossFade, model = spotifyImageUrl(cover.replaceFirst("http://", "https://")), contentDescription = null,
                 contentScale = ContentScale.Crop, modifier = Modifier.padding(start = 10.dp).size(44.dp).clip(RoundedCornerShape(4.dp)))
+        }
+
+        // Context Actions Menu Button
+        val coroutineScope = rememberCoroutineScope()
+        Box {
+            IconButton(
+                onClick = { menuOpen = true },
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(Icons.Filled.MoreVert, contentDescription = "Actions", tint = StatsSubtle, modifier = Modifier.size(20.dp))
+            }
+
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false },
+                modifier = Modifier.background(tone(0xFF242424)),
+            ) {
+                if (track != null) {
+                    DropdownMenuItem(
+                        text = { Text("Play Song", color = AppText) },
+                        leadingIcon = { Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = AppAccent) },
+                        onClick = {
+                            menuOpen = false
+                            SongPlayer.playSong(track.uri, contextUri = f.contextUri)
+                        },
+                    )
+                    val album = track.album
+                    if (album != null) {
+                        DropdownMenuItem(
+                            text = { Text("Open Album", color = AppText) },
+                            leadingIcon = { Icon(Icons.Filled.Album, contentDescription = null, tint = AppText) },
+                            onClick = {
+                                menuOpen = false
+                                navController.navigate(com.music.spotui.ui.navigation.albumRoute(album.name, id = album.uri.substringAfterLast(':')))
+                            },
+                        )
+                    }
+                    val artist = track.artists.firstOrNull()
+                    if (artist != null) {
+                        DropdownMenuItem(
+                            text = { Text("Open Artist", color = AppText) },
+                            leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null, tint = AppText) },
+                            onClick = {
+                                menuOpen = false
+                                navController.navigate(com.music.spotui.ui.navigation.artistRoute(artist.name, artist.uri.substringAfterLast(':')))
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Save to Library", color = AppText) },
+                        leadingIcon = { Icon(Icons.Filled.FavoriteBorder, contentDescription = null, tint = AppText) },
+                        onClick = {
+                            menuOpen = false
+                            coroutineScope.launch {
+                                runCatching { MyspotiRuntime.api.library.add(listOf(track.uri)) }
+                            }
+                        },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("View Profile", color = AppText) },
+                    leadingIcon = { Icon(Icons.Filled.AccountCircle, contentDescription = null, tint = AppText) },
+                    onClick = {
+                        menuOpen = false
+                        openProfile()
+                    },
+                )
+            }
         }
     }
 }

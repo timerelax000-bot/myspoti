@@ -1,6 +1,7 @@
 package com.music.spotui.ui.navigation
 
 import androidx.activity.compose.BackHandler
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
@@ -65,6 +66,10 @@ private val CloseEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
 
 @Composable
 fun PlayerOverlay(navController: NavController) {
+    val navStack by navController.currentBackStackEntryAsState()
+    val currentRoute = navStack?.destination?.route
+    if (currentRoute == Routes.CarMode.route) return
+
     // Any navigation from the player (album, artist, playlist…) lands on that page.
     LaunchedEffect(navController) {
         navController.currentBackStackEntryFlow.drop(1).collect { PlayerSheet.close() }

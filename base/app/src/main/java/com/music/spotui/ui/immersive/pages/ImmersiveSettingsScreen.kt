@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Palette
@@ -152,6 +153,7 @@ private fun SettingsRoot(navController: NavController, open: (SettingsPage) -> U
     }
     ImmersivePage(title = stringResource(R.string.settings_title), onBack = back) {
         immersiveGroup("root") {
+            row { ImmersiveGroupRow("Immersive Experience 2.0", detail = "Dynamic Backgrounds, Widescreen TV & Video Audio Handoff", icon = Icons.Rounded.AutoAwesome, chevron = true, onClick = { navController.navigate(Routes.ImmersiveExperienceSettings.route) }) }
             row { ImmersiveGroupRow(stringResource(R.string.settings_section_playback), icon = Icons.Rounded.PlayArrow, chevron = true, onClick = { open(SettingsPage.Playback) }) }
             row { ImmersiveGroupRow(stringResource(R.string.settings_section_downloads), icon = Icons.Rounded.Download, chevron = true, onClick = { open(SettingsPage.Downloads) }) }
             row { ImmersiveGroupRow(stringResource(R.string.settings_section_data), icon = Icons.Rounded.SignalCellularAlt, chevron = true, onClick = { open(SettingsPage.Data) }) }
@@ -220,10 +222,34 @@ private fun PlaybackPage(navController: NavController, open: (SettingsPage) -> U
     val extHeader = ext?.let { stringResource(R.string.ext_section_settings, it.name) }
     ImmersivePage(title = stringResource(R.string.settings_section_playback), onBack = back) {
         if (ext != null && extHeader != null) extensionSectionGroup(ext, extHeader)
-        if (ext?.hidesAppQuality != true) immersiveGroup("quality", footerRes = R.string.quality_streaming_detail) {
+
+        immersiveGroup("accounts", headerRes = R.string.settings_section_playback) {
+            row {
+                ImmersiveGroupRow(
+                    "Spotify Accounts", detail = "Manage multiple Spotify accounts & persistent sessions",
+                    chevron = true, onClick = { navController.navigate(Routes.Accounts.route) },
+                )
+            }
+            row {
+                ImmersiveGroupRow(
+                    "Car Mode", detail = "Bluetooth auto-activation, voice commands & driving UI",
+                    chevron = true, onClick = { navController.navigate(Routes.CarModeSettings.route) },
+                )
+            }
+        }
+
+        if (ext?.hidesAppQuality != true) immersiveGroup("quality", headerRes = R.string.settings_section_data, footerRes = R.string.quality_streaming_detail) {
             row { ImmersiveGroupRow(stringResource(R.string.quality_streaming_wifi_title), value = stringResource(label(wifi)), chevron = true, onClick = { open(SettingsPage.StreamingWifi) }) }
             row { ImmersiveGroupRow(stringResource(R.string.quality_streaming_cell_title), value = stringResource(label(cell)), chevron = true, onClick = { open(SettingsPage.StreamingCell) }) }
+            row {
+                ImmersiveGroupRow(
+                    stringResource(R.string.equalizer_title), detail = stringResource(R.string.equalizer_settings_detail),
+                    value = if (com.music.spotui.data.preferences.EqualizerPref.enabled) stringResource(com.music.spotui.ui.screens.eqPresetLabel(com.music.spotui.data.preferences.EqualizerPref.preset)) else null,
+                    chevron = true, onClick = { navController.navigate(Routes.Equalizer.route) },
+                )
+            }
         }
+
         immersiveGroup("playback") {
             row {
                 ImmersiveSwitchRow(
@@ -248,14 +274,6 @@ private fun PlaybackPage(navController: NavController, open: (SettingsPage) -> U
                     chevron = true, onClick = { open(SettingsPage.Crossfade) },
                 )
             }
-            // The local player's equalizer, speed and silence skipping (never Spotify's own songs).
-            row {
-                ImmersiveGroupRow(
-                    stringResource(R.string.equalizer_title), detail = stringResource(R.string.equalizer_settings_detail),
-                    value = if (com.music.spotui.data.preferences.EqualizerPref.enabled) stringResource(com.music.spotui.ui.screens.eqPresetLabel(com.music.spotui.data.preferences.EqualizerPref.preset)) else null,
-                    chevron = true, onClick = { navController.navigate(Routes.Equalizer.route) },
-                )
-            }
             row {
                 ImmersiveSwitchRow(
                     stringResource(R.string.settings_keep_playing_title), checked = keepPlaying,
@@ -270,25 +288,6 @@ private fun PlaybackPage(navController: NavController, open: (SettingsPage) -> U
                     detail = stringResource(R.string.settings_headset_skip_detail),
                 )
             }
-            // Songs an extension streams, played by Spotify too (unheard): counted there, seen by Connect.
-            if (com.music.spotui.extensions.Extensions.sources(app.myspoti.extensions.Action.AUDIO_SOURCE).isNotEmpty()) row {
-                ImmersiveSwitchRow(
-                    stringResource(R.string.settings_connect_mirror_title),
-                    checked = com.music.spotui.data.preferences.ConnectMirrorPref.on,
-                    onChecked = { com.music.spotui.data.preferences.ConnectMirrorPref.set(ctx, it) },
-                    detail = stringResource(R.string.settings_connect_mirror_detail),
-                )
-            }
-            // Downloaded songs, played from their files online, played by Spotify too (unheard), as an extension's.
-            row {
-                ImmersiveSwitchRow(
-                    stringResource(R.string.settings_download_sync_title),
-                    checked = com.music.spotui.data.preferences.DownloadSyncPref.on,
-                    onChecked = { com.music.spotui.data.preferences.DownloadSyncPref.set(ctx, it) },
-                    detail = stringResource(R.string.settings_download_sync_detail),
-                )
-            }
-            // Songs marked "Not interested": skipped by lists, listed here to be shown again.
             row {
                 ImmersiveGroupRow(
                     stringResource(R.string.hidden_songs_title), detail = stringResource(R.string.hidden_songs_detail),
@@ -296,9 +295,8 @@ private fun PlaybackPage(navController: NavController, open: (SettingsPage) -> U
                 )
             }
         }
-        sourcesGroup(app.myspoti.extensions.Action.AUDIO_SOURCE, navController)
-        immersiveGroup("visuals") {
-            // Lyrics: word by word (karaoke) first, or line by line with Spotify's first.
+
+        immersiveGroup("sync") {
             row {
                 ImmersiveSwitchRow(
                     stringResource(R.string.lyrics_word_sync_title), checked = wordSync,
@@ -311,7 +309,24 @@ private fun PlaybackPage(navController: NavController, open: (SettingsPage) -> U
                     detail = stringResource(if (wordSync) R.string.lyrics_word_sync_on else R.string.lyrics_word_sync_off),
                 )
             }
+            if (com.music.spotui.extensions.Extensions.sources(app.myspoti.extensions.Action.AUDIO_SOURCE).isNotEmpty()) row {
+                ImmersiveSwitchRow(
+                    stringResource(R.string.settings_connect_mirror_title),
+                    checked = com.music.spotui.data.preferences.ConnectMirrorPref.on,
+                    onChecked = { com.music.spotui.data.preferences.ConnectMirrorPref.set(ctx, it) },
+                    detail = stringResource(R.string.settings_connect_mirror_detail),
+                )
+            }
+            row {
+                ImmersiveSwitchRow(
+                    stringResource(R.string.settings_download_sync_title),
+                    checked = com.music.spotui.data.preferences.DownloadSyncPref.on,
+                    onChecked = { com.music.spotui.data.preferences.DownloadSyncPref.set(ctx, it) },
+                    detail = stringResource(R.string.settings_download_sync_detail),
+                )
+            }
         }
+        sourcesGroup(app.myspoti.extensions.Action.AUDIO_SOURCE, navController)
     }
 }
 
@@ -481,6 +496,14 @@ private fun DisplayPage(open: (SettingsPage) -> Unit, back: () -> Unit) {
     val rotation = com.music.spotui.data.preferences.OrientationPref.mode
     val language = remember { com.music.spotui.data.AppLanguage.current(ctx) }
     val auto = stringResource(R.string.language_auto)
+
+    val autoCanvasSaver by com.music.spotui.data.preferences.ImmersiveSettingsPref.autoCanvasSaverMobileDataEnabled.collectAsStateWithLifecycle()
+    val canvasQuality by com.music.spotui.data.preferences.ImmersiveSettingsPref.canvasQualityLimit.collectAsStateWithLifecycle()
+    val animatedArt by com.music.spotui.data.preferences.ImmersiveSettingsPref.animatedArtworkEnabled.collectAsStateWithLifecycle()
+    val gestureCtrl by com.music.spotui.data.preferences.ImmersiveSettingsPref.gestureControlsEnabled.collectAsStateWithLifecycle()
+    val visualizerOn by com.music.spotui.data.preferences.ImmersiveSettingsPref.visualizerEnabled.collectAsStateWithLifecycle()
+    val visualizerInt by com.music.spotui.data.preferences.ImmersiveSettingsPref.visualizerIntensity.collectAsStateWithLifecycle()
+
     ImmersivePage(title = stringResource(R.string.settings_section_display), onBack = back) {
         immersiveGroup("look") {
             row {
@@ -540,6 +563,77 @@ private fun DisplayPage(open: (SettingsPage) -> Unit, back: () -> Unit) {
                 row {
                     ImmersiveSwitchRow(stringResource(R.string.settings_player_modes_title), checked = com.music.spotui.data.preferences.PlayerModesPref.on,
                         onChecked = { com.music.spotui.data.preferences.PlayerModesPref.set(ctx, it) }, detail = stringResource(R.string.settings_player_modes_detail))
+                }
+            }
+        }
+
+        immersiveGroup("canvas_and_performance", header = "CANVAS & PERFORMANCE") {
+            row {
+                ImmersiveSwitchRow(
+                    "Automatic Canvas Saver on Mobile Data",
+                    checked = autoCanvasSaver,
+                    onChecked = { com.music.spotui.data.preferences.ImmersiveSettingsPref.setAutoCanvasSaverMobileData(ctx, it) },
+                    detail = "Automatically reduces Canvas video quality and prevents unnecessary video downloads when using mobile data.",
+                )
+            }
+            row {
+                ImmersiveGroupRow(
+                    "Canvas Quality Limit",
+                    value = when (canvasQuality) {
+                        "480p" -> "480p"
+                        "artwork_only" -> "Artwork Only"
+                        else -> "Auto"
+                    },
+                    chevron = true,
+                    onClick = {
+                        val next = when (canvasQuality) {
+                            "auto" -> "480p"
+                            "480p" -> "artwork_only"
+                            else -> "auto"
+                        }
+                        com.music.spotui.data.preferences.ImmersiveSettingsPref.setCanvasQualityLimit(ctx, next)
+                    },
+                )
+            }
+            row {
+                ImmersiveSwitchRow(
+                    "Animated Artwork",
+                    checked = animatedArt,
+                    onChecked = { com.music.spotui.data.preferences.ImmersiveSettingsPref.setAnimatedArtwork(ctx, it) },
+                    detail = "Parallax, subtle rotation and ambient sheen over cover art",
+                )
+            }
+            row {
+                ImmersiveSwitchRow(
+                    "Gesture Controls",
+                    checked = gestureCtrl,
+                    onChecked = { com.music.spotui.data.preferences.ImmersiveSettingsPref.setGestureControls(ctx, it) },
+                    detail = "Swipe left/right to skip tracks, double tap to like, long press for menu",
+                )
+            }
+            row {
+                ImmersiveSwitchRow(
+                    "Subtle Visualizer",
+                    checked = visualizerOn,
+                    onChecked = { com.music.spotui.data.preferences.ImmersiveSettingsPref.setVisualizer(ctx, it) },
+                    detail = "Fluid waveform and pulse rings surrounding artwork",
+                )
+            }
+            if (visualizerOn) {
+                row {
+                    ImmersiveGroupRow(
+                        "Visualizer Intensity",
+                        value = visualizerInt.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() },
+                        chevron = true,
+                        onClick = {
+                            val next = when (visualizerInt) {
+                                "low" -> "medium"
+                                "medium" -> "high"
+                                else -> "low"
+                            }
+                            com.music.spotui.data.preferences.ImmersiveSettingsPref.setVisualizerIntensity(ctx, next)
+                        },
+                    )
                 }
             }
         }

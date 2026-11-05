@@ -116,15 +116,19 @@ class LyricsViewModel constructor() : ViewModel() {
 
     fun load(track: LyricsApi.Track, force: Boolean = false) {
         val key = track.key
-        if (!force && loadedKey == key && _state.value !is State.NotFound) return
+        val isNewKey = loadedKey != key
+        if (!force && !isNewKey && _state.value !is State.NotFound) return
         loadedKey = key
         stopSelecting()
         _triedNothing.value = null
         if (force) LyricsApi.forget(track)
+        // Set loading state when changing keys or forcing reload
+        if (isNewKey || force) {
+            _state.value = State.Loading
+        }
         // Already resolved (prefetched while the track started): no loading flash.
         LyricsApi.cached(track)?.let { _state.value = loadedState(it); return }
-        // Read again (the setting changed): the lyrics shown stay until the new ones replace them.
-        if (!(force && _state.value is State.Loaded)) _state.value = State.Loading
+
         // Spotify's own lines shown as soon as they are there; the word-timed ones replace them.
         val earlyJob = viewModelScope.launch {
             LyricsApi.early.collect { e ->
@@ -137,11 +141,10 @@ class LyricsViewModel constructor() : ViewModel() {
             withContext(Dispatchers.Main) {
                 // A skip during the fetch: don't show the previous song's lyrics.
                 if (loadedKey != key) return@withContext
-                val shown = (_state.value as? State.Loaded)?.lyrics
-                _state.value = when {
-                    lyrics == null || lyrics.isEmpty -> if (shown != null) _state.value else State.NotFound
-                    shown == lyrics -> _state.value
-                    else -> loadedState(lyrics)
+                _state.value = if (lyrics == null || lyrics.isEmpty) {
+                    State.NotFound
+                } else {
+                    loadedState(lyrics)
                 }
             }
         }

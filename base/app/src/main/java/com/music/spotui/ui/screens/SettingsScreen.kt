@@ -93,258 +93,275 @@ fun SettingsScreen(navController: NavController) {
             }
         }
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).navigationBarsPadding()) {
-            // The first source of each order, when it is an extension announcing settings in that tab.
             val registry by com.music.spotui.extensions.Extensions.registry.collectAsStateWithLifecycle()
-            // A source picked in the player for this session leads too ([com.music.spotui.extensions.SessionSource]).
             val session by com.music.spotui.extensions.Extensions.sessionSource.collectAsStateWithLifecycle()
+
             if (tab == 0) {
-            Section(R.string.settings_section_playback)
-            // An extension above Spotify: its settings, and Spotify's quality (kept, still used for what Spotify plays) leaves.
-            val ext = remember(registry, session) { com.music.spotui.extensions.Extensions.sectionPlacement(app.myspoti.extensions.SettingSection.PLAYBACK) }
-            ext?.let { ExtensionSectionSettings(it) }
-            if (ext?.hidesAppQuality != true) {
-                StreamingQualityPicker(title = R.string.quality_streaming_wifi_title)
-                StreamingQualityPicker(cellular = true, title = R.string.quality_streaming_cell_title)
-            }
-            var canvasWifiOnly by remember { mutableStateOf(com.music.spotui.data.preferences.isCanvasWifiOnly(ctx)) }
-            OptionRow(
-                label = stringResource(R.string.canvas_wifi_only),
-                detail = stringResource(R.string.canvas_wifi_only_detail),
-                checked = canvasWifiOnly,
-                onChecked = { canvasWifiOnly = it; com.music.spotui.data.preferences.setCanvasWifiOnly(ctx, it) },
-            )
-            OptionRow(
-                label = stringResource(R.string.settings_autoplay_title),
-                detail = stringResource(R.string.settings_autoplay_detail),
-                checked = com.music.spotui.data.preferences.AutoplayPref.on,
-                onChecked = { com.music.spotui.data.preferences.AutoplayPref.set(ctx, it) },
-            )
-            OptionRow(
-                label = stringResource(R.string.myspoti_shuffle_title),
-                detail = stringResource(R.string.myspoti_shuffle_detail),
-                checked = com.music.spotui.data.preferences.AppShufflePref.on,
-                onChecked = { com.music.spotui.data.preferences.AppShufflePref.set(ctx, it) },
-            )
-            CrossfadeRow()
-            // The local player's equalizer, speed and silence skipping (never Spotify's own songs).
-            Column(
-                Modifier.fillMaxWidth().clickable { navController.navigate(com.music.spotui.ui.navigation.Routes.Equalizer.route) }
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-            ) {
-                Text(stringResource(R.string.equalizer_title), color = AppText, fontSize = 16.sp)
-                Text(stringResource(R.string.equalizer_settings_detail), color = AppMuted, fontSize = 12.sp)
-            }
-            var keepPlaying by remember { mutableStateOf(app.myspoti.host.android.PlaybackService.keepsPlayingOnClose(ctx)) }
-            OptionRow(
-                label = stringResource(R.string.settings_keep_playing_title),
-                detail = stringResource(R.string.settings_keep_playing_detail),
-                checked = keepPlaying,
-                onChecked = { keepPlaying = it; app.myspoti.host.android.PlaybackService.setKeepsPlayingOnClose(ctx, it) },
-            )
-            var headsetSkip by remember { mutableStateOf(app.myspoti.host.android.PlaybackService.skipsOnEpisodes(ctx)) }
-            OptionRow(
-                label = stringResource(R.string.settings_headset_skip_title),
-                detail = stringResource(R.string.settings_headset_skip_detail),
-                checked = headsetSkip,
-                onChecked = { headsetSkip = it; app.myspoti.host.android.PlaybackService.setSkipsOnEpisodes(ctx, it) },
-            )
-            // Lyrics: word by word (karaoke) first, or line by line with Spotify's first.
-            var wordSync by remember { mutableStateOf(com.music.spotui.data.preferences.isLyricsWordSync(ctx)) }
-            OptionRow(
-                label = stringResource(R.string.lyrics_word_sync_title),
-                detail = stringResource(if (wordSync) R.string.lyrics_word_sync_on else R.string.lyrics_word_sync_off),
-                checked = wordSync,
-                onChecked = {
-                    wordSync = it
-                    com.music.spotui.data.preferences.setLyricsWordSync(ctx, it)
-                    com.music.spotui.data.api.LyricsApi.wordSync = it
-                    com.music.spotui.data.api.LyricsApi.forgetAll()
-                },
-            )
-            // Songs an extension streams, played by Spotify too (unheard): counted there, seen by Connect.
-            if (com.music.spotui.extensions.Extensions.sources(app.myspoti.extensions.Action.AUDIO_SOURCE).isNotEmpty())
-                OptionRow(
-                    label = stringResource(R.string.settings_connect_mirror_title),
-                    detail = stringResource(R.string.settings_connect_mirror_detail),
-                    checked = com.music.spotui.data.preferences.ConnectMirrorPref.on,
-                    onChecked = { com.music.spotui.data.preferences.ConnectMirrorPref.set(ctx, it) },
-                )
-            // Downloaded songs, played from their files online, played by Spotify too (unheard), as an extension's.
-            OptionRow(
-                label = stringResource(R.string.settings_download_sync_title),
-                detail = stringResource(R.string.settings_download_sync_detail),
-                checked = com.music.spotui.data.preferences.DownloadSyncPref.on,
-                onChecked = { com.music.spotui.data.preferences.DownloadSyncPref.set(ctx, it) },
-            )
-            // Songs marked "Not interested": skipped by lists, listed here to be shown again.
-            Column(
-                Modifier.fillMaxWidth().clickable { navController.navigate(com.music.spotui.ui.navigation.Routes.HiddenSongs.route) }
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-            ) {
-                Text(stringResource(R.string.hidden_songs_title), color = AppText, fontSize = 16.sp)
-                Text(stringResource(R.string.hidden_songs_detail), color = AppMuted, fontSize = 12.sp)
-            }
-            Divider()
-            SourcesBlock(app.myspoti.extensions.Action.AUDIO_SOURCE, navController)
-
-            Section(R.string.settings_section_data)
-            OptionRow(
-                label = stringResource(R.string.energy_saver_title),
-                detail = stringResource(R.string.energy_saver_summary),
-                checked = energy.manualSaver,
-                onChecked = app.myspoti.power.EnergySettings::setSaver,
-            )
-            OptionRow(
-                label = stringResource(R.string.data_saver_title),
-                detail = stringResource(R.string.data_saver_summary),
-                checked = com.music.spotui.data.DataSaver.enabled,
-                onChecked = com.music.spotui.data.DataSaver::set,
-            )
-            // Battery optimization off = music and Connect keep going with the screen off.
-            var exempt by remember { androidx.compose.runtime.mutableStateOf(app.myspoti.power.BatteryExemption.isExempt(ctx)) }
-            androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                exempt = app.myspoti.power.BatteryExemption.isExempt(ctx)
-            }
-            OptionRow(
-                label = stringResource(R.string.background_playback_title),
-                detail = stringResource(if (exempt) R.string.background_playback_on else R.string.background_playback_off),
-                checked = exempt,
-                onChecked = {
-                    if (exempt) ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-                    else app.myspoti.power.BatteryExemption.request(ctx)
-                },
-            )
-            // Samsung's "Sleeping apps" is a second list: the app has to be in Never sleeping apps too.
-            if (app.myspoti.power.BatteryExemption.isSamsung()) Column(
-                Modifier.fillMaxWidth().clickable { app.myspoti.power.BatteryExemption.openAppSettings(ctx) }
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-            ) {
-                Text(stringResource(R.string.background_playback_open), color = AppText, fontSize = 16.sp)
-                Text(stringResource(R.string.background_playback_samsung), color = AppMuted, fontSize = 12.sp)
-            }
-            }
-            if (tab == 1) {
-            Section(R.string.settings_section_downloads)
-            // Its role quality takes the place of the app's (kept, and still passed to every extension as `quality`).
-            val ext = remember(registry) { com.music.spotui.extensions.Extensions.sectionPlacement(app.myspoti.extensions.SettingSection.DOWNLOADS) }
-            if (ext?.hidesAppQuality != true) DownloadQualityPicker()
-            ext?.let { ExtensionSectionSettings(it) }
-            // Where downloads come from: the download-source extensions, in the order they are asked.
-            if (com.music.spotui.extensions.Extensions.sources(app.myspoti.extensions.Action.DOWNLOAD_SOURCE).isNotEmpty())
-                SourcesBlock(app.myspoti.extensions.Action.DOWNLOAD_SOURCE, navController)
-            else Column(
-                Modifier.fillMaxWidth().clickable { navController.navigate(com.music.spotui.ui.navigation.Routes.Extensions.route) }
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-            ) {
-                Text(stringResource(R.string.downloads_source_row_title), color = AppText, fontSize = 16.sp)
-                Text(
-                    stringResource(
-                        if (com.music.spotui.extensions.Extensions.hasDownloadSource()) R.string.downloads_source_row_on
-                        else R.string.downloads_source_row_off,
-                    ),
-                    color = AppMuted, fontSize = 12.sp,
-                )
-            }
-            if (com.music.spotui.data.offline.OfflineStore.tracks.isNotEmpty()) RemoveDownloadsRow()
-            }
-            if (tab == 2) {
-
-            Section(R.string.settings_section_display)
-            OptionRow(
-                label = stringResource(R.string.settings_amoled_theme),
-                detail = stringResource(R.string.settings_amoled_theme_subtitle),
-                checked = energy.blackPreference,
-                onChecked = app.myspoti.power.EnergySettings::setBlackBackground,
-            )
-            OptionRow(
-                label = stringResource(R.string.settings_item_canvas_title),
-                detail = stringResource(if (energy.policy.saverEnabled) R.string.energy_saver_summary else R.string.video_settings_canvas_subtitle),
-                checked = energy.canvasEnabled && !energy.policy.saverEnabled,
-                enabled = !energy.policy.saverEnabled,
-                onChecked = app.myspoti.power.EnergySettings::setCanvasEnabled,
-            )
-            OptionRow(
-                label = stringResource(R.string.settings_music_video_title),
-                detail = stringResource(R.string.settings_music_video_detail),
-                checked = com.music.spotui.data.preferences.MusicVideoPref.on,
-                onChecked = { com.music.spotui.data.preferences.MusicVideoPref.set(ctx, it) },
-            )
-            OptionRow(
-                label = stringResource(R.string.settings_player_lyrics_card_title),
-                detail = stringResource(R.string.settings_player_lyrics_card_detail),
-                checked = com.music.spotui.data.preferences.PlayerLyricsCardPref.on,
-                onChecked = { com.music.spotui.data.preferences.PlayerLyricsCardPref.set(ctx, it) },
-            )
-            OptionRow(
-                label = stringResource(R.string.settings_player_source_title),
-                detail = stringResource(R.string.settings_player_source_detail),
-                checked = com.music.spotui.data.preferences.PlayerSourceLinePref.on,
-                onChecked = { com.music.spotui.data.preferences.PlayerSourceLinePref.set(ctx, it) },
-            )
-            OptionRow(
-                label = stringResource(R.string.settings_solid_nav_title),
-                detail = stringResource(R.string.settings_solid_nav_detail),
-                checked = com.music.spotui.data.preferences.SolidNavBar.on,
-                onChecked = { com.music.spotui.data.preferences.SolidNavBar.set(ctx, it) },
-            )
-            OptionRow(
-                label = stringResource(R.string.settings_hide_dj_title),
-                detail = stringResource(R.string.settings_hide_dj_detail),
-                checked = com.music.spotui.data.preferences.HideDjPref.on,
-                onChecked = { com.music.spotui.data.preferences.HideDjPref.set(ctx, it) },
-            )
-            AccentRow(com.music.spotui.data.preferences.Look.CLASSIC)
-            LookRow()
-            OrientationRow()
-            LanguageRow()
-            TvDesktopModeSection()
-            }
-            if (tab == 3) {
-            ExtensionSettingsRows(navController)
-            // Third-party extensions: lyrics, a song's audio, scripts reacting to the music.
-            Column(
-                Modifier.fillMaxWidth().clickable { navController.navigate(com.music.spotui.ui.navigation.Routes.Extensions.route) }
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-            ) {
-                Text(stringResource(R.string.extensions_title), color = AppText, fontSize = 16.sp)
-                Text(stringResource(R.string.extensions_row_detail), color = AppMuted, fontSize = 12.sp)
-            }
-            }
-            if (tab == 4) {
-            Section(R.string.settings_section_app)
-            AboutRow()
-            // A18: the launch check can be turned off; the manual check below keeps working.
-            OptionRow(
-                label = stringResource(R.string.settings_auto_update_title),
-                detail = stringResource(R.string.settings_auto_update_detail),
-                checked = com.music.spotui.data.preferences.AutoUpdateCheckPref.on,
-                onChecked = { com.music.spotui.data.preferences.AutoUpdateCheckPref.set(ctx, it) },
-            )
-            // The hidden Web Player stuck or crashed: rebuild it without leaving the app.
-            Column(
-                Modifier.fillMaxWidth().clickable {
-                    app.myspoti.host.android.MyspotiRuntime.host.reload()
-                    // Reported: nothing said the restart happened.
-                    android.widget.Toast.makeText(ctx, ctx.getString(R.string.restart_player_done), android.widget.Toast.LENGTH_SHORT).show()
+                Section("Spotify Accounts & Driving")
+                Column(
+                    Modifier.fillMaxWidth().clickable { navController.navigate(com.music.spotui.ui.navigation.Routes.Accounts.route) }
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text("Spotify Accounts", color = AppText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Manage multiple Spotify accounts & persistent sessions", color = AppMuted, fontSize = 12.sp)
                 }
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-            ) {
-                Text(stringResource(R.string.restart_player_title), color = AppText, fontSize = 16.sp)
-                Text(stringResource(R.string.restart_player_detail), color = AppMuted, fontSize = 12.sp)
+                Column(
+                    Modifier.fillMaxWidth().clickable { navController.navigate(com.music.spotui.ui.navigation.Routes.CarModeSettings.route) }
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text("Car Mode", color = AppText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Bluetooth automation, voice commands, and driving controls", color = AppMuted, fontSize = 12.sp)
+                }
+                Divider()
+
+                Section("Audio & Quality")
+                val ext = remember(registry, session) { com.music.spotui.extensions.Extensions.sectionPlacement(app.myspoti.extensions.SettingSection.PLAYBACK) }
+                ext?.let { ExtensionSectionSettings(it) }
+                if (ext?.hidesAppQuality != true) {
+                    StreamingQualityPicker(title = R.string.quality_streaming_wifi_title)
+                    StreamingQualityPicker(cellular = true, title = R.string.quality_streaming_cell_title)
+                }
+                Column(
+                    Modifier.fillMaxWidth().clickable { navController.navigate(com.music.spotui.ui.navigation.Routes.Equalizer.route) }
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text(stringResource(R.string.equalizer_title), color = AppText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.equalizer_settings_detail), color = AppMuted, fontSize = 12.sp)
+                }
+                Divider()
+
+                Section("Playback Preferences")
+                var canvasWifiOnly by remember { mutableStateOf(com.music.spotui.data.preferences.isCanvasWifiOnly(ctx)) }
+                OptionRow(
+                    label = stringResource(R.string.canvas_wifi_only),
+                    detail = stringResource(R.string.canvas_wifi_only_detail),
+                    checked = canvasWifiOnly,
+                    onChecked = { canvasWifiOnly = it; com.music.spotui.data.preferences.setCanvasWifiOnly(ctx, it) },
+                )
+                OptionRow(
+                    label = stringResource(R.string.settings_autoplay_title),
+                    detail = stringResource(R.string.settings_autoplay_detail),
+                    checked = com.music.spotui.data.preferences.AutoplayPref.on,
+                    onChecked = { com.music.spotui.data.preferences.AutoplayPref.set(ctx, it) },
+                )
+                OptionRow(
+                    label = stringResource(R.string.myspoti_shuffle_title),
+                    detail = stringResource(R.string.myspoti_shuffle_detail),
+                    checked = com.music.spotui.data.preferences.AppShufflePref.on,
+                    onChecked = { com.music.spotui.data.preferences.AppShufflePref.set(ctx, it) },
+                )
+                CrossfadeRow()
+                var keepPlaying by remember { mutableStateOf(app.myspoti.host.android.PlaybackService.keepsPlayingOnClose(ctx)) }
+                OptionRow(
+                    label = stringResource(R.string.settings_keep_playing_title),
+                    detail = stringResource(R.string.settings_keep_playing_detail),
+                    checked = keepPlaying,
+                    onChecked = { keepPlaying = it; app.myspoti.host.android.PlaybackService.setKeepsPlayingOnClose(ctx, it) },
+                )
+                var headsetSkip by remember { mutableStateOf(app.myspoti.host.android.PlaybackService.skipsOnEpisodes(ctx)) }
+                OptionRow(
+                    label = stringResource(R.string.settings_headset_skip_title),
+                    detail = stringResource(R.string.settings_headset_skip_detail),
+                    checked = headsetSkip,
+                    onChecked = { headsetSkip = it; app.myspoti.host.android.PlaybackService.setSkipsOnEpisodes(ctx, it) },
+                )
+                Column(
+                    Modifier.fillMaxWidth().clickable { navController.navigate(com.music.spotui.ui.navigation.Routes.HiddenSongs.route) }
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text(stringResource(R.string.hidden_songs_title), color = AppText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.hidden_songs_detail), color = AppMuted, fontSize = 12.sp)
+                }
+                Divider()
+
+                Section("Integration & Sync")
+                var wordSync by remember { mutableStateOf(com.music.spotui.data.preferences.isLyricsWordSync(ctx)) }
+                OptionRow(
+                    label = stringResource(R.string.lyrics_word_sync_title),
+                    detail = stringResource(if (wordSync) R.string.lyrics_word_sync_on else R.string.lyrics_word_sync_off),
+                    checked = wordSync,
+                    onChecked = {
+                        wordSync = it
+                        com.music.spotui.data.preferences.setLyricsWordSync(ctx, it)
+                        com.music.spotui.data.api.LyricsApi.wordSync = it
+                        com.music.spotui.data.api.LyricsApi.forgetAll()
+                    },
+                )
+                if (com.music.spotui.extensions.Extensions.sources(app.myspoti.extensions.Action.AUDIO_SOURCE).isNotEmpty())
+                    OptionRow(
+                        label = stringResource(R.string.settings_connect_mirror_title),
+                        detail = stringResource(R.string.settings_connect_mirror_detail),
+                        checked = com.music.spotui.data.preferences.ConnectMirrorPref.on,
+                        onChecked = { com.music.spotui.data.preferences.ConnectMirrorPref.set(ctx, it) },
+                    )
+                OptionRow(
+                    label = stringResource(R.string.settings_download_sync_title),
+                    detail = stringResource(R.string.settings_download_sync_detail),
+                    checked = com.music.spotui.data.preferences.DownloadSyncPref.on,
+                    onChecked = { com.music.spotui.data.preferences.DownloadSyncPref.set(ctx, it) },
+                )
+                SourcesBlock(app.myspoti.extensions.Action.AUDIO_SOURCE, navController)
             }
-            // The report a tester hands us. The engine's log is otherwise reachable only through
-            // adb logcat, which the person reporting the bug cannot run: the label is a literal
-            // rather than a string resource so this change stays out of the shared string files.
-            Column(
-                Modifier.fillMaxWidth().clickable {
-                    val file = runCatching { app.myspoti.host.android.Logbook.export(ctx) }.getOrNull()
-                    if (file != null) shareDiagnosticReport(ctx, file)
-                    else android.widget.Toast.makeText(ctx, ctx.getString(R.string.diagnostic_export_failed), android.widget.Toast.LENGTH_SHORT).show()
-                }.padding(horizontal = 20.dp, vertical = 10.dp),
-            ) {
-                Text(stringResource(R.string.diagnostic_export_title), color = AppText, fontSize = 16.sp)
-                Text(stringResource(R.string.diagnostic_export_detail), color = AppMuted, fontSize = 12.sp)
+
+            if (tab == 1) {
+                Section(R.string.settings_section_downloads)
+                val ext = remember(registry) { com.music.spotui.extensions.Extensions.sectionPlacement(app.myspoti.extensions.SettingSection.DOWNLOADS) }
+                if (ext?.hidesAppQuality != true) DownloadQualityPicker()
+                ext?.let { ExtensionSectionSettings(it) }
+                if (com.music.spotui.extensions.Extensions.sources(app.myspoti.extensions.Action.DOWNLOAD_SOURCE).isNotEmpty())
+                    SourcesBlock(app.myspoti.extensions.Action.DOWNLOAD_SOURCE, navController)
+                else Column(
+                    Modifier.fillMaxWidth().clickable { navController.navigate(com.music.spotui.ui.navigation.Routes.Extensions.route) }
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text(stringResource(R.string.downloads_source_row_title), color = AppText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        stringResource(
+                            if (com.music.spotui.extensions.Extensions.hasDownloadSource()) R.string.downloads_source_row_on
+                            else R.string.downloads_source_row_off,
+                        ),
+                        color = AppMuted, fontSize = 12.sp,
+                    )
+                }
+                if (com.music.spotui.data.offline.OfflineStore.tracks.isNotEmpty()) RemoveDownloadsRow()
             }
+
+            if (tab == 2) {
+                Section("Visuals & Player UI")
+                OptionRow(
+                    label = stringResource(R.string.settings_amoled_theme),
+                    detail = stringResource(R.string.settings_amoled_theme_subtitle),
+                    checked = energy.blackPreference,
+                    onChecked = app.myspoti.power.EnergySettings::setBlackBackground,
+                )
+                OptionRow(
+                    label = stringResource(R.string.settings_item_canvas_title),
+                    detail = stringResource(if (energy.policy.saverEnabled) R.string.energy_saver_summary else R.string.video_settings_canvas_subtitle),
+                    checked = energy.canvasEnabled && !energy.policy.saverEnabled,
+                    enabled = !energy.policy.saverEnabled,
+                    onChecked = app.myspoti.power.EnergySettings::setCanvasEnabled,
+                )
+                OptionRow(
+                    label = stringResource(R.string.settings_music_video_title),
+                    detail = stringResource(R.string.settings_music_video_detail),
+                    checked = com.music.spotui.data.preferences.MusicVideoPref.on,
+                    onChecked = { com.music.spotui.data.preferences.MusicVideoPref.set(ctx, it) },
+                )
+                OptionRow(
+                    label = stringResource(R.string.settings_player_lyrics_card_title),
+                    detail = stringResource(R.string.settings_player_lyrics_card_detail),
+                    checked = com.music.spotui.data.preferences.PlayerLyricsCardPref.on,
+                    onChecked = { com.music.spotui.data.preferences.PlayerLyricsCardPref.set(ctx, it) },
+                )
+                OptionRow(
+                    label = stringResource(R.string.settings_player_source_title),
+                    detail = stringResource(R.string.settings_player_source_detail),
+                    checked = com.music.spotui.data.preferences.PlayerSourceLinePref.on,
+                    onChecked = { com.music.spotui.data.preferences.PlayerSourceLinePref.set(ctx, it) },
+                )
+                OptionRow(
+                    label = stringResource(R.string.settings_solid_nav_title),
+                    detail = stringResource(R.string.settings_solid_nav_detail),
+                    checked = com.music.spotui.data.preferences.SolidNavBar.on,
+                    onChecked = { com.music.spotui.data.preferences.SolidNavBar.set(ctx, it) },
+                )
+                OptionRow(
+                    label = stringResource(R.string.settings_hide_dj_title),
+                    detail = stringResource(R.string.settings_hide_dj_detail),
+                    checked = com.music.spotui.data.preferences.HideDjPref.on,
+                    onChecked = { com.music.spotui.data.preferences.HideDjPref.set(ctx, it) },
+                )
+                Divider()
+
+                Section("Theme, Look & Language")
+                AccentRow(com.music.spotui.data.preferences.Look.CLASSIC)
+                LookRow()
+                OrientationRow()
+                LanguageRow()
+                Divider()
+
+                Section("Device Layout")
+                TvDesktopModeSection()
+            }
+
+            if (tab == 3) {
+                Section("Extensions & Add-ons")
+                ExtensionSettingsRows(navController)
+                Column(
+                    Modifier.fillMaxWidth().clickable { navController.navigate(com.music.spotui.ui.navigation.Routes.Extensions.route) }
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text(stringResource(R.string.extensions_title), color = AppText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.extensions_row_detail), color = AppMuted, fontSize = 12.sp)
+                }
+            }
+
+            if (tab == 4) {
+                Section("Performance & Battery")
+                OptionRow(
+                    label = stringResource(R.string.energy_saver_title),
+                    detail = stringResource(R.string.energy_saver_summary),
+                    checked = energy.manualSaver,
+                    onChecked = app.myspoti.power.EnergySettings::setSaver,
+                )
+                OptionRow(
+                    label = stringResource(R.string.data_saver_title),
+                    detail = stringResource(R.string.data_saver_summary),
+                    checked = com.music.spotui.data.DataSaver.enabled,
+                    onChecked = com.music.spotui.data.DataSaver::set,
+                )
+                var exempt by remember { androidx.compose.runtime.mutableStateOf(app.myspoti.power.BatteryExemption.isExempt(ctx)) }
+                androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                    exempt = app.myspoti.power.BatteryExemption.isExempt(ctx)
+                }
+                OptionRow(
+                    label = stringResource(R.string.background_playback_title),
+                    detail = stringResource(if (exempt) R.string.background_playback_on else R.string.background_playback_off),
+                    checked = exempt,
+                    onChecked = {
+                        if (exempt) ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                        else app.myspoti.power.BatteryExemption.request(ctx)
+                    },
+                )
+                if (app.myspoti.power.BatteryExemption.isSamsung()) Column(
+                    Modifier.fillMaxWidth().clickable { app.myspoti.power.BatteryExemption.openAppSettings(ctx) }
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text(stringResource(R.string.background_playback_open), color = AppText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.background_playback_samsung), color = AppMuted, fontSize = 12.sp)
+                }
+                Divider()
+
+                Section("Updates & Diagnostics")
+                OptionRow(
+                    label = stringResource(R.string.settings_auto_update_title),
+                    detail = stringResource(R.string.settings_auto_update_detail),
+                    checked = com.music.spotui.data.preferences.AutoUpdateCheckPref.on,
+                    onChecked = { com.music.spotui.data.preferences.AutoUpdateCheckPref.set(ctx, it) },
+                )
+                Column(
+                    Modifier.fillMaxWidth().clickable {
+                        app.myspoti.host.android.MyspotiRuntime.host.reload()
+                        android.widget.Toast.makeText(ctx, ctx.getString(R.string.restart_player_done), android.widget.Toast.LENGTH_SHORT).show()
+                    }.padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text(stringResource(R.string.restart_player_title), color = AppText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.restart_player_detail), color = AppMuted, fontSize = 12.sp)
+                }
+                Column(
+                    Modifier.fillMaxWidth().clickable {
+                        val file = runCatching { app.myspoti.host.android.Logbook.export(ctx) }.getOrNull()
+                        if (file != null) shareDiagnosticReport(ctx, file)
+                        else android.widget.Toast.makeText(ctx, ctx.getString(R.string.diagnostic_export_failed), android.widget.Toast.LENGTH_SHORT).show()
+                    }.padding(horizontal = 20.dp, vertical = 12.dp),
+                ) {
+                    Text(stringResource(R.string.diagnostic_export_title), color = AppText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.diagnostic_export_detail), color = AppMuted, fontSize = 12.sp)
+                }
+                Divider()
+
+                Section("About")
+                AboutRow()
             }
             // Clear of the mini player and the navigation bar, as every other page (96 dp left the
             // last rows, "Restart the player" among them, under the mini player).
@@ -393,6 +410,12 @@ private fun SourcesBlock(action: app.myspoti.extensions.Action, navController: N
 @Composable
 internal fun Section(title: Int) {
     Text(stringResource(title).uppercase(), color = com.music.spotui.ui.theme.AppAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+        letterSpacing = 1.sp, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp))
+}
+
+@Composable
+internal fun Section(title: String) {
+    Text(title.uppercase(), color = com.music.spotui.ui.theme.AppAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold,
         letterSpacing = 1.sp, modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp))
 }
 

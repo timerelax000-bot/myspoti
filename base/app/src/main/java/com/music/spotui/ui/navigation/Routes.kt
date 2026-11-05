@@ -26,6 +26,7 @@ sealed class Routes(
     object Downloads : Routes(0, "Downloads", "downloads")
     object HiddenSongs : Routes(0, "HiddenSongs", "hiddensongs")
     object Equalizer : Routes(0, "Equalizer", "equalizer")
+    object ImmersiveExperienceSettings : Routes(0, "ImmersiveExperienceSettings", "immersive_settings")
     object Folder : Routes(0, "Folder", "folder")
     object LocalPlaylist : Routes(0, "LocalPlaylist", "localplaylist")
     object Category : Routes(0, "Category", "category")
@@ -41,6 +42,10 @@ sealed class Routes(
     /** A repository's extension, before it is installed (by id). */
     object ExtensionEntry : Routes(0, "ExtensionEntry", "extension-store")
     object Profile : Routes(0, "Profile", "profile")
+    object Accounts : Routes(0, "Accounts", "accounts")
+    object CarMode : Routes(0, "CarMode", "carmode")
+    object CarModeSettings : Routes(0, "CarModeSettings", "carmode_settings")
+    object FullscreenPlayer : Routes(0, "FullscreenPlayer", "fullscreen_player")
 }
 
 /** A Spotify user's profile, by user id (the part after spotify:user:). */

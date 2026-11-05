@@ -33,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.music.spotui.ui.navigation.MainBottomNavigation
 import com.music.spotui.ui.navigation.MyNavHost
 import com.music.spotui.ui.navigation.navigateSingleTop
@@ -44,6 +45,28 @@ fun App() {
     val bottomBarState = rememberSaveable { (mutableStateOf(true)) }
     val bottomBarPlayerState = rememberSaveable { (mutableStateOf(true)) }
     val navController = rememberNavController()
+
+    // Track active route
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    val isCarMode = currentRoute == com.music.spotui.ui.navigation.Routes.CarMode.route
+
+    // Detect Android TV mode
+    val isTv = com.music.spotui.tv.rememberIsTv()
+
+    // Car Mode Bluetooth / trigger navigation
+    val carModeActive by com.music.spotui.car.CarModeManager.isCarModeActive.collectAsState()
+    LaunchedEffect(carModeActive, currentRoute) {
+        if (carModeActive) {
+            if (currentRoute != com.music.spotui.ui.navigation.Routes.CarMode.route) {
+                navController.navigateSingleTop(com.music.spotui.ui.navigation.Routes.CarMode.route)
+            }
+        } else {
+            if (currentRoute == com.music.spotui.ui.navigation.Routes.CarMode.route) {
+                navController.popBackStack()
+            }
+        }
+    }
 
     // Debug and beta builds: `myspoti-cli nav <route>` (see CliReceiver).
     LaunchedEffect(Unit) { com.music.spotui.cli.CliReceiver.nav.collect { r -> runCatching { navController.navigate(r) } } }
@@ -83,6 +106,7 @@ fun App() {
     LaunchedEffect(playingUri) {
         if (!playingUri.startsWith("spotify:track:")) return@LaunchedEffect
         kotlinx.coroutines.delay(2_000) // the song's own loads first
+        if (com.music.spotui.di.SongPlayer.nowPlaying.value.uri != playingUri) return@LaunchedEffect
         val st = com.music.spotui.di.Graph.currentSongState
         com.music.spotui.data.api.GeniusMeaning.prefetch(playingUri.substringAfterLast(':'), st.title.value, st.singer.value, geniusLang)
     }
@@ -125,33 +149,40 @@ fun App() {
         com.music.spotui.ui.immersive.shell.LocalImmersiveFrostPage provides if (frostPage) glassPage else null,
         com.music.spotui.ui.immersive.shell.LocalImmersiveChrome provides if (immersive) chrome else null,
     ) {
-    // Large windows (tablets, foldables, DeX): Classic's tabs in a rail at the side, the
-    // Immersive tab bar on the left edge (ImmersiveBottomChrome); phones keep the bottom bars.
-    val large = com.music.spotui.ui.components.windowSize().large
-    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-      androidx.compose.foundation.layout.Row(Modifier.fillMaxSize()) {
-        // Before the Scaffold, in a group of its own: the nav host keeps its place when the
-        // window grows or shrinks past the threshold (back stack and pages kept).
-        if (large && !immersive) com.music.spotui.ui.navigation.MainNavigationRail(navController)
-        Scaffold(
-            modifier = Modifier.weight(1f),
-            bottomBar = {
-                if (!immersive) MainBottomNavigation(navController = navController, bottomBarState = bottomBarState, bottomBarPlayerState)
+    // TV environment gets dedicated TV Shell
+    if (isTv) {
+        com.music.spotui.tv.TvShell(navController)
+    } else {
+        // Large windows (tablets, foldables, DeX): Classic's tabs in a rail at the side, the
+        // Immersive tab bar on the left edge (ImmersiveBottomChrome); phones keep the bottom bars.
+        val large = com.music.spotui.ui.components.windowSize().large
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+          androidx.compose.foundation.layout.Row(Modifier.fillMaxSize()) {
+            // Before the Scaffold, in a group of its own: the nav host keeps its place when the
+            // window grows or shrinks past the threshold (back stack and pages kept).
+            if (large && !immersive && !isCarMode) com.music.spotui.ui.navigation.MainNavigationRail(navController)
+            Scaffold(
+                modifier = Modifier.weight(1f),
+                bottomBar = {
+                    if (!immersive && !isCarMode) MainBottomNavigation(navController = navController, bottomBarState = bottomBarState, bottomBarPlayerState)
+                }
+            ) {
+                MyNavHost(
+                    navHostController = navController, bottomBarState = bottomBarState, bottomBarPlayerState,
+                    // Immersive: each page marks its own list as what the glass bars blur (a source on
+                    // the whole host would hold the pages' own top bars too).
+                    modifier = if (immersive) Modifier.background(com.music.spotui.ui.immersive.Immersive.Page) else Modifier,
+                )
             }
-        ) {
-            MyNavHost(
-                navHostController = navController, bottomBarState = bottomBarState, bottomBarPlayerState,
-                // Immersive: each page marks its own list as what the glass bars blur (a source on
-                // the whole host would hold the pages' own top bars too).
-                modifier = if (immersive) Modifier.background(com.music.spotui.ui.immersive.Immersive.Page) else Modifier,
-            )
+          }
+            if (!isCarMode) {
+                if (immersive) ImmersiveShell(navController)
+                // Over the pages and the bottom bar: pulling it down shows them, already in place.
+                else com.music.spotui.ui.navigation.PlayerOverlay(navController)
+            }
+            // "Not interested" and its Undo, over the pages and the players.
+            com.music.spotui.ui.components.HiddenSongUndo()
         }
-      }
-        if (immersive) ImmersiveShell(navController)
-        // Over the pages and the bottom bar: pulling it down shows them, already in place.
-        else com.music.spotui.ui.navigation.PlayerOverlay(navController)
-        // "Not interested" and its Undo, over the pages and the players.
-        com.music.spotui.ui.components.HiddenSongUndo()
     }
     }
 }

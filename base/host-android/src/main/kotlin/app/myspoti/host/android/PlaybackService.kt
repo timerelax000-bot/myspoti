@@ -261,13 +261,19 @@ class PlaybackService : MediaBrowserServiceCompat() {
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, info.title)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, info.artist)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, info.album)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, info.title)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, info.artist)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, info.album)
             .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, info.coverUrl)
+            .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, info.coverUrl)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, info.coverUrl)
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, info.durationMs)
             .apply {
                 // Both keys: the lock screen, the shade, Bluetooth and the car do not read the same one.
                 val art = cover.takeIf { withArt && info.coverUrl == lastCoverUrl && it?.isRecycled == false }
                 putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art)
                 putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
+                putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art)
             }
             .build())
         runCatching { session.setMetadata(metadata(true)) }.onFailure {
@@ -287,7 +293,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 if (info.liked) R.drawable.msp_ic_liked else R.drawable.msp_ic_like)
             .addCustomAction(ACTION_SHUFFLE, getString(if (info.shuffle) R.string.msp_shuffle_off else R.string.msp_shuffle_on),
                 if (info.shuffle) R.drawable.msp_ic_shuffle_on else R.drawable.msp_ic_shuffle)
-            .setState(state, info.positionMs, if (info.playing && !info.buffering) 1f else 0f)
+            .setState(state, info.positionMs, if (info.playing && !info.buffering) 1f else 0f, android.os.SystemClock.elapsedRealtime())
             .build())
     }
 
@@ -640,6 +646,8 @@ class PlaybackService : MediaBrowserServiceCompat() {
         @Volatile var controls: PlaybackControls? = null
         @Volatile var library: MediaLibrary? = null
 
+        @Volatile private var lastPositionUpdateAt = 0L
+
         /** Pushes the now-playing state; starts the service when playback starts. */
         fun update(context: Context, info: NowPlayingInfo) {
             val before = current
@@ -653,12 +661,13 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 }.onFailure { Logbook.logEvery("service-start", 10_000, "service not started for playback: ${it.javaClass.simpleName} ${it.message?.take(80)}") }
                 return
             }
-            // The player reports several times per second (position, buffering): only a real
-            // change reaches the session and the notification, the system extrapolates the
-            // position in between (the known state is republished every POSITION_REPUSH_MS).
-            if (before != null && before.sameAs(info) &&
-                kotlin.math.abs(info.positionMs - before.positionMs) < POSITION_REPUSH_MS
-            ) return
+            val now = android.os.SystemClock.elapsedRealtime()
+            val timeDelta = now - lastPositionUpdateAt
+            val expectedPos = if (before != null && before.playing) before.positionMs + timeDelta else (before?.positionMs ?: 0L)
+            val isSeek = before != null && kotlin.math.abs(info.positionMs - expectedPos) > 1500L
+            if (before != null && before.sameAs(info) && !isSeek && timeDelta < POSITION_REPUSH_MS) return
+
+            lastPositionUpdateAt = now
             svc.apply(info)
             svc.show(info)
             // Sound with no foreground service (bound by the car only, promotion refused): start it.

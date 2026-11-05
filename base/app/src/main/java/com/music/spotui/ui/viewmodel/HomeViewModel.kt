@@ -22,6 +22,14 @@ class HomeViewModel constructor(private val repository: AppRepository = Graph.re
 
     init {
         fetchHome()
+        viewModelScope.launch {
+            var initial = true
+            com.music.spotui.data.AccountSessionManager.sessionVersion.collect {
+                if (initial) { initial = false; return@collect }
+                _home.value = Response.Loading()
+                fetchHome()
+            }
+        }
         // A Home that failed (player still signing in, network back) loads again by itself:
         // when the player is ready again, then a few times with growing pauses.
         viewModelScope.launch {

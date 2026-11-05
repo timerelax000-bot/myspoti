@@ -52,7 +52,20 @@ object ProfileCache {
                     imageUrl = me.images.best(160)?.url
                     id = me.username
                     // The downloads shown are this account's own (see OfflineAccounts).
-                    id?.let { com.music.spotui.data.offline.OfflineAccounts.claim(context.applicationContext, it) }
+                    id?.let { userId ->
+                        ScreenCache.setAccount(userId)
+                        com.music.spotui.data.offline.OfflineAccounts.claim(context.applicationContext, userId)
+                        runCatching {
+                            com.music.spotui.data.AccountStore.addOrUpdateAccount(
+                                context = context.applicationContext,
+                                spotifyUserId = userId,
+                                name = me.name,
+                                email = me.username,
+                                imageUrl = me.images.best(160)?.url.orEmpty(),
+                                plan = "Spotify",
+                            )
+                        }
+                    }
                     return@launch
                 }
             } finally {

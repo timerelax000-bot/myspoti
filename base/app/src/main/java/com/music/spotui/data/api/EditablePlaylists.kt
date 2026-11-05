@@ -25,6 +25,11 @@ object EditablePlaylists {
     @Volatile private var idsAt = 0L
     private const val IDS_TTL_MS = 5 * 60_000L
 
+    fun clearSession() {
+        ids = null
+        idsAt = 0L
+    }
+
     suspend fun ids(): Set<String> {
         val now = System.currentTimeMillis()
         ids?.takeIf { now - idsAt < IDS_TTL_MS }?.let { return it }

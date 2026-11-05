@@ -11,6 +11,7 @@
 package com.music.spotui.ui.immersive.player
 
 import androidx.activity.compose.BackHandler
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -67,6 +68,10 @@ private fun slideSpec(reduce: Boolean) = com.music.spotui.ui.immersive.motion.Im
  */
 @Composable
 fun ImmersivePlayerOverlay(navController: NavController) {
+    val navStack by navController.currentBackStackEntryAsState()
+    val currentRoute = navStack?.destination?.route
+    if (currentRoute == com.music.spotui.ui.navigation.Routes.CarMode.route) return
+
     // Any navigation from the player (album, artist, playlist…) lands on that page.
     LaunchedEffect(navController) {
         navController.currentBackStackEntryFlow.drop(1).collect { PlayerSheet.close() }
@@ -108,6 +113,37 @@ fun ImmersivePlayerOverlay(navController: NavController) {
     }
     if (!shown) return
     BackHandler(enabled = open) { PlayerSheet.close() }
+
+    // Edge-to-edge true fullscreen on TV and horizontal/landscape phone
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val config = androidx.compose.ui.platform.LocalConfiguration.current
+    val isTv = remember { com.music.spotui.tv.TvDetect.isTv(context) }
+    val isLandscapeOrTv = isTv || config.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+    androidx.compose.runtime.DisposableEffect(open, isLandscapeOrTv) {
+        val activity = context as? android.app.Activity
+        val window = activity?.window
+        if (window != null && isLandscapeOrTv) {
+            val controller = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+            if (open) {
+                controller.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            } else {
+                controller.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            }
+        }
+        onDispose {
+            if (isLandscapeOrTv) {
+                val activityDispose = context as? android.app.Activity
+                val windowDispose = activityDispose?.window
+                if (windowDispose != null) {
+                    val controller = androidx.core.view.WindowCompat.getInsetsController(windowDispose, windowDispose.decorView)
+                    controller.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                }
+            }
+        }
+    }
+
     // Compose's clickable asks the view for the system "click" sound on every tap; the Classic player
     // is silent, so the window's sound effects are off while this player is up (haptics are separate).
     val view = androidx.compose.ui.platform.LocalView.current

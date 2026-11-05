@@ -56,6 +56,19 @@ class LibraryViewModel constructor(
         val cachedArtists = getCachedFollowedArtists(context)
         if (cachedArtists.isNotEmpty()) _followedArtists.value = cachedArtists
 
+        viewModelScope.launch {
+            var initial = true
+            com.music.spotui.data.AccountSessionManager.sessionVersion.collect {
+                if (initial) { initial = false; return@collect }
+                server = null
+                _entries.value = Response.Loading()
+                _followedArtists.value = emptyList()
+                load()
+                loadAccount()
+                loadFollowedArtists()
+            }
+        }
+
         load()
         loadAccount()
         loadFollowedArtists()

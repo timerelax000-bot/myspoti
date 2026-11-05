@@ -4,6 +4,9 @@ import android.app.Application
 import app.myspoti.host.android.MyspotiRuntime
 import com.music.spotui.data.api.Api
 import com.music.spotui.ui.repository.AppRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /** Manual replacement for Spotui's Hilt graph: app-wide singletons. */
 object Graph {
@@ -12,10 +15,22 @@ object Graph {
 
     fun init(application: Application) {
         app = application
+        // Multi-Account manager: initialize account list synchronously before starting runtime
+        runCatching { com.music.spotui.data.AccountStore.initSync(application) }
+        val activeAccount = com.music.spotui.data.AccountStore.activeAccount.value
+        val activeProfile = activeAccount?.webViewProfileName
+        com.music.spotui.data.api.ScreenCache.setAccount(activeAccount?.spotifyUserId)
+        MyspotiRuntime.onSessionReset = {
+            com.music.spotui.data.api.ProfileCache.clearSession()
+            com.music.spotui.data.api.Api.HomeCache.clear()
+            com.music.spotui.data.api.ScreenCache.clear()
+            com.music.spotui.data.api.EditablePlaylists.clearSession()
+        }
         // The data saver first: on a metered network with it on, nothing may go out, not even the page.
         com.music.spotui.data.DataSaver.init(application)
+        com.music.spotui.data.CanvasNetworkPolicy.init(application)
         // The Spotify session: hidden Web Player + API (operation hashes refresh themselves).
-        MyspotiRuntime.start(application, loadPage = !com.music.spotui.data.DataSaver.active)
+        MyspotiRuntime.start(application, loadPage = !com.music.spotui.data.DataSaver.active, profileName = activeProfile)
         // The streaming quality the user chose, set on the player at every page load.
         com.music.spotui.data.preferences.applyStreamingQuality(application)
         // The crossfade length (0 = off), in the player from the first song on.
@@ -34,6 +49,12 @@ object Graph {
         com.music.spotui.data.offline.OfflineDownloader.resumePending()
         // Episodes have their own queue and their own file: resumed the same way.
         com.music.spotui.data.offline.PodcastDownloader.resumePending()
+        // Multi-Account manager & Car Mode automation
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching { com.music.spotui.data.AccountStore.init(application) }
+        }
+        com.music.spotui.car.CarModeManager.init(application)
+
         // Installed extensions: each enabled one loads in its own sandbox, off the main thread.
         com.music.spotui.extensions.Extensions.init(application)
     }

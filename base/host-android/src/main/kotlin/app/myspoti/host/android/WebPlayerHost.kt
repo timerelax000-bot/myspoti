@@ -35,7 +35,10 @@ import java.io.ByteArrayInputStream
  * - [loginRequired] turns true on Spotify's login pages: the UI then shows [view] so the
  *   user signs in on Spotify's own page.
  */
-class WebPlayerHost(private val context: Context) : BridgeHost {
+class WebPlayerHost(
+    private val context: Context,
+    val profileName: String? = null,
+) : BridgeHost {
     private val main = Handler(Looper.getMainLooper())
 
     // DROP_OLDEST: tryEmit under a main-thread stall must not drop the newest
@@ -159,6 +162,33 @@ class WebPlayerHost(private val context: Context) : BridgeHost {
      */
     @SuppressLint("SetJavaScriptEnabled")
     private fun createView(): WebView = AwakeWebView(context.applicationContext).apply {
+        val webView = this
+        if (profileName != null && androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE)) {
+            runCatching {
+                val profileStore = androidx.webkit.ProfileStore.getInstance()
+                val profile = profileStore.getOrCreateProfile(profileName)
+                androidx.webkit.WebViewCompat.setProfile(webView, profileName)
+                profile.cookieManager.apply {
+                    setAcceptCookie(true)
+                    setAcceptThirdPartyCookies(webView, true)
+                }
+                Logbook.log("WebPlayerHost: Using isolated WebView profile: $profileName")
+            }.onFailure {
+                Logbook.log("WebPlayerHost: Failed to configure profile $profileName (${it.message}); falling back to default")
+                CookieManager.getInstance().apply {
+                    setAcceptCookie(true)
+                    setAcceptThirdPartyCookies(webView, true)
+                }
+            }
+        } else {
+            if (profileName != null) {
+                Logbook.log("WebPlayerHost: MULTI_PROFILE not supported by system WebView, falling back to default profile")
+            }
+            CookieManager.getInstance().apply {
+                setAcceptCookie(true)
+                setAcceptThirdPartyCookies(webView, true)
+            }
+        }
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -203,11 +233,6 @@ class WebPlayerHost(private val context: Context) : BridgeHost {
         relay = ControlRelay(this, fingerprint).also {
             it.onDeviceRegistered = { drmAsked = true; main.removeCallbacks(drmWatch) }
             it.install()
-        }
-        val webView = this
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(webView, true)
         }
         hostChannel = exposeToPlayer("MyspotiHost") { json -> _messages.tryEmit(json) }
         webChromeClient = object : WebChromeClient() {
@@ -385,10 +410,10 @@ class WebPlayerHost(private val context: Context) : BridgeHost {
     }
 
     /** The container the page is attached to, so a rebuilt page goes back to the same place. */
-    private var container: ViewGroup? = null
+    internal var container: ViewGroup? = null
 
     /** Whether the page was shown full screen at the last [attach] (login). */
-    private var lastVisible = false
+    internal var lastVisible = false
 
     /**
      * Replaces the page after its renderer died: the dead WebView is destroyed rather than reused,
@@ -566,6 +591,22 @@ class WebPlayerHost(private val context: Context) : BridgeHost {
     fun retryLogin() = main.post { beginLoginLoad(); cleanSlate { view.loadUrl(LOGIN_URL) } }
 
     private fun cleanSlate(then: () -> Unit) {
+        val isMultiProfile = profileName != null && androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE)
+        if (isMultiProfile) {
+            runCatching {
+                val profile = androidx.webkit.ProfileStore.getInstance().getProfile(profileName!!)
+                if (profile != null) {
+                    profile.cookieManager.removeAllCookies {
+                        main.post {
+                            profile.webStorage.deleteAllData()
+                            view.clearCache(true)
+                            then()
+                        }
+                    }
+                    return
+                }
+            }
+        }
         CookieManager.getInstance().removeAllCookies {
             main.post {
                 // Web storage too: localStorage/IndexedDB hold the player's session
@@ -582,7 +623,19 @@ class WebPlayerHost(private val context: Context) : BridgeHost {
      * while later: an app swiped away right after signing in (the exit log shows "SwipeUpClean" and
      * "OneKeyClean" on Xiaomi) lost the sign-in and asked for it again at the next start.
      */
-    fun flushCookies() = CookieManager.getInstance().flush()
+    fun flushCookies() {
+        val isMultiProfile = profileName != null && androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.MULTI_PROFILE)
+        if (isMultiProfile) {
+            runCatching {
+                val profile = androidx.webkit.ProfileStore.getInstance().getProfile(profileName!!)
+                if (profile != null) {
+                    profile.cookieManager.flush()
+                    return
+                }
+            }
+        }
+        CookieManager.getInstance().flush()
+    }
 
     private var loginProbes = 0
     private var loginReloaded = false
@@ -662,7 +715,7 @@ class WebPlayerHost(private val context: Context) : BridgeHost {
             runCatching { view.evaluateJavascript(script) { value -> done.complete(value) } }
                 .onFailure { done.completeExceptionally(app.myspoti.spotify.bridge.BridgeException("page not reachable: ${it.message}")) }
         }
-        return done.await()
+        return kotlinx.coroutines.withTimeoutOrNull(5_000L) { done.await() }
     }
 
     /**
@@ -728,6 +781,17 @@ class WebPlayerHost(private val context: Context) : BridgeHost {
     }
 
     fun detach() = main.post { (view.parent as? ViewGroup)?.removeView(view) }
+
+    /** Safely tear down and destroy this WebView host during account switches or shutdowns. */
+    fun destroy() = main.post {
+        main.removeCallbacksAndMessages(null)
+        onPageLoaded = null
+        onPageStarting = null
+        detach()
+        runCatching { view.stopLoading() }
+        runCatching { (view as? AwakeWebView)?.releaseFromWindow() }
+        runCatching { view.destroy() }
+    }
 
     /** Frees the page (data saver, low memory). [load] brings it back. */
     fun unload() = main.post { loadAsked = false; view.loadUrl("about:blank") }

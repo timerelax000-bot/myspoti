@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
@@ -369,6 +370,11 @@ fun SongOptionsSheet(
                     MenuRow(Icons.Outlined.GraphicEq, stringResource(R.string.quality_sheet_title)) { showQuality = true }
                 }
                 MenuRow(Icons.Outlined.Analytics, stringResource(R.string.nerd_title)) { showNerd = true }
+                MenuRow(Icons.Filled.DirectionsCar, "Car Mode") {
+                    onDismiss()
+                    com.music.spotui.car.CarModeManager.enterCarMode(context)
+                    navController.navigate(com.music.spotui.ui.navigation.Routes.CarMode.route)
+                }
             }
             // Entries from extensions (menu.items), after the app's own; each names its extension.
             if (hasId) com.music.spotui.extensions.ExtensionMenuEntries(

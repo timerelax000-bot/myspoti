@@ -57,7 +57,7 @@ class PlayerViewModel constructor(private val currentSongState: CurrentSongState
     private val _songs : MutableStateFlow<Response<List<SongsModel>>> = MutableStateFlow(Response.Loading())
     val songs : StateFlow<Response<List<SongsModel>>> = _songs
 
-    val playingArtist by mutableStateOf(currentSongSinger.value)
+    val playingArtist: String get() = currentSongSinger.value
 
 
 
@@ -89,14 +89,24 @@ class PlayerViewModel constructor(private val currentSongState: CurrentSongState
     private var canvasJob: Job? = null
 
     fun loadCanvas(trackId: String, allowFetch: Boolean = true) {
-        // Already looked up (prefetched when the song started, or a reopened player): at once,
-        // so the screen knows before its first frame whether the Canvas or the cover shows.
+        val app = com.music.spotui.di.Graph.app
         repository.knownCanvas(trackId)?.let { known ->
             canvasJob?.cancel(); canvasJob = null
-            canvasRequests.resolve(trackId, known.getOrNull())
+            val url = known.getOrNull()
+            val validUrl = if (url != null && !com.music.spotui.data.CanvasNetworkPolicy.isCanvasAllowed(app, url)) null else url
+            canvasRequests.resolve(trackId, validUrl)
             _canvasState.value = canvasRequests.state
             return
         }
+
+        if (com.music.spotui.data.CanvasNetworkPolicy.isCanvasSaverActive &&
+            !com.music.spotui.data.CanvasNetworkPolicy.isCanvasAllowed(app, null)) {
+            canvasJob?.cancel(); canvasJob = null
+            canvasRequests.resolve(trackId, null)
+            _canvasState.value = canvasRequests.state
+            return
+        }
+
         val request = canvasRequests.select(trackId, allowFetch) ?: return
         canvasJob?.cancel()
         canvasJob = null
@@ -105,11 +115,11 @@ class PlayerViewModel constructor(private val currentSongState: CurrentSongState
         canvasJob = viewModelScope.launch {
             try {
                 val url = withContext(Dispatchers.IO) { repository.provideCanvasUrl(request.trackId) }
-                if (canvasRequests.complete(request, url)) _canvasState.value = canvasRequests.state
+                val allowedUrl = if (url != null && !com.music.spotui.data.CanvasNetworkPolicy.isCanvasAllowed(app, url)) null else url
+                if (canvasRequests.complete(request, allowedUrl)) _canvasState.value = canvasRequests.state
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                // A transient network/token failure falls back to the artwork.
                 if (canvasRequests.fail(request)) _canvasState.value = canvasRequests.state
             } finally {
                 if (canvasRequests.owns(request)) canvasJob = null

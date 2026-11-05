@@ -22,13 +22,24 @@ import java.io.File
  */
 object ScreenCache {
     private const val TAG = "ScreenCache"
-    // Bumped when a cached model changes shape.
-    private const val DIR = "screen_cache1"
+    @Volatile private var accountKey: String = "default"
+
+    fun setAccount(spotifyUserId: String?) {
+        accountKey = if (!spotifyUserId.isNullOrBlank()) {
+            runCatching {
+                java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(spotifyUserId.toByteArray())
+                    .take(8)
+                    .joinToString("") { "%02x".format(it) }
+            }.getOrDefault("user_${spotifyUserId.hashCode()}")
+        } else "default"
+    }
+
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
     // One thread: writes and clear() run in call order, so a write already in
     // flight at logout cannot land after the clear and restore the old account.
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
-    private val dir: File by lazy { File(Graph.app.filesDir, DIR).also { it.mkdirs() } }
+    private val dir: File get() = File(Graph.app.filesDir, "screen_cache_$accountKey").also { it.mkdirs() }
 
     val home = Entry("home", HomeFeedModel.serializer())
     val libraryRoot = Entry("library_root", ListSerializer(LibraryEntry.serializer()))

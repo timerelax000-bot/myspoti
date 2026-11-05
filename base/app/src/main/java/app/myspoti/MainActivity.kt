@@ -184,6 +184,9 @@ class MainActivity : AppCompatActivity() {
         com.music.spotui.di.Haptics.attach(compose)
         // Debug builds: `am start ... --ez showPlayer true` shows the Web Player page full screen.
         val debuggable = applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
+        MyspotiRuntime.onHostRecreated = { newHost ->
+            newHost.attach(root, visible = debuggable && intent.getBooleanExtra("showPlayer", false))
+        }
         MyspotiRuntime.host.attach(root, visible = debuggable && intent.getBooleanExtra("showPlayer", false))
         // A new activity while the sign-in page is open (the system let the old one go while the user
         // read the e-mail code): the page is still there and is put back in front as it was left. It
@@ -319,7 +322,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Spotify's login page, full screen, until the Web Player comes back signed in. */
-    private fun showLogin() {
+    fun showLogin() {
         showingLogin = true
         MyspotiRuntime.host.attach(root, visible = true)
         MyspotiRuntime.host.openLogin()
@@ -484,8 +487,8 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             combine(api.ready, MyspotiRuntime.loginRequired) { ready, login -> ready to login }.collect { (ready, login) ->
                 when {
-                    login && !showingLogin && signedIn -> {
-                        // The session expired: whoever signs in on that page may be another account.
+                    login && !showingLogin -> {
+                        // Spotify requires login: bring login page fullscreen
                         com.music.spotui.di.SessionActions.sessionLost()
                         showLogin()
                     }

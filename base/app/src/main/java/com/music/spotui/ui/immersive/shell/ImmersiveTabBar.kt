@@ -148,7 +148,8 @@ internal fun rememberTabNavigation(navController: NavController): TabNavigation 
     val navStack by navController.currentBackStackEntryAsState()
     val currentRoute = navStack?.destination?.route
     val fullScreen = currentRoute == Routes.Player.route ||
-        currentRoute == Routes.Queue.route
+        currentRoute == Routes.Queue.route ||
+        currentRoute == Routes.CarMode.route
 
     // The tab the user is in, even on one of its sub-pages (album, artist...). Kept whether or
     // not the bar shows, so it survives the bar being hidden on the player.
