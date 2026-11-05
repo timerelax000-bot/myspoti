@@ -46,8 +46,6 @@ object SpotifySync {
             .substringBefore('?')
             .substringAfterLast(':')
     }
-
-    /** Adds a track to one of the user's playlists. */
     fun addTrackToPlaylist(context: Context, playlistId: String, trackId: String, onDone: (Boolean) -> Unit = {}) {
         val cleanPl = cleanId(playlistId)
         val cleanTr = cleanId(trackId)

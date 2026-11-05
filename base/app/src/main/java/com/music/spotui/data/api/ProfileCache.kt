@@ -51,20 +51,26 @@ object ProfileCache {
                     name = me.name
                     imageUrl = me.images.best(160)?.url
                     id = me.username
-                    // The downloads shown are this account's own (see OfflineAccounts).
-                    id?.let { userId ->
-                        ScreenCache.setAccount(userId)
-                        com.music.spotui.data.offline.OfflineAccounts.claim(context.applicationContext, userId)
-                        runCatching {
-                            com.music.spotui.data.AccountStore.addOrUpdateAccount(
-                                context = context.applicationContext,
-                                spotifyUserId = userId,
-                                name = me.name,
-                                email = me.username,
-                                imageUrl = me.images.best(160)?.url.orEmpty(),
-                                plan = "Spotify",
-                            )
-                        }
+                    ScreenCache.setAccount(me.username)
+                    val key = com.music.spotui.data.offline.OfflineAccounts.keyOf(me.username)
+                    val host = MyspotiRuntime.host
+                    val profile = host.profile
+                    var duplicates = emptyList<String>()
+                    host.accounts.update { list ->
+                        list.signedIn(profile, key, me.name, imageUrl, System.currentTimeMillis()).also { duplicates = it.second }.first
+                    }
+                    duplicates.forEach { host.removeProfile(it) }
+                    com.music.spotui.data.local.ListenHistory.claim(key)
+                    com.music.spotui.data.offline.OfflineAccounts.claim(context.applicationContext, me.username)
+                    runCatching {
+                        com.music.spotui.data.AccountStore.addOrUpdateAccount(
+                            context = context.applicationContext,
+                            spotifyUserId = me.username,
+                            name = me.name,
+                            email = me.username,
+                            imageUrl = me.images.best(160)?.url.orEmpty(),
+                            plan = "Spotify",
+                        )
                     }
                     return@launch
                 }

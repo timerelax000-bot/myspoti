@@ -119,6 +119,9 @@ fun ImmersiveSongOptionsSheet(
     if (showSleep) { SleepTimerSheet(onDismiss = { showSleep = false; onDismiss() }); return }
 
     val hasId = song.spotifyTrackId.isNotBlank()
+    // A Live Radio station playing right now: no queue, album or artist page of its own, but
+    // (unlike a track with no Spotify id) a name and homepage worth sharing.
+    val isRadio = nowPlaying && com.music.spotui.radio.RadioPlayer.current() != null
     val episodeKey = com.music.spotui.data.offline.episodeKeyOf(song)
     val downloadKey = episodeKey ?: song.spotifyTrackId
     fun toast(text: String) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
@@ -179,6 +182,12 @@ fun ImmersiveSongOptionsSheet(
                 toast(context.getString(R.string.snackbar_added_to_queue))
                 onDismiss()
             }
+        } else if (onOpenQueue != null) {
+            ImmersiveSheetRow(Icons.AutoMirrored.Rounded.QueueMusic, stringResource(R.string.context_menu_go_to_queue), enabled = !isRadio) {
+                onDismiss()
+                onOpenQueue()
+            }
+        }
         }
 
         val offline = com.music.spotui.data.offline.OfflineStore.statusOf(downloadKey)
@@ -225,19 +234,18 @@ fun ImmersiveSongOptionsSheet(
                 navigate = { route -> navController.navigate(route) },
                 onFailed = { toast(context.getString(R.string.song_radio_failed)) })
         }
-
-        if (!nowPlaying) {
-            ImmersiveSheetRow(Icons.Rounded.Album, stringResource(R.string.context_menu_browse_album), enabled = song.album.isNotBlank() || song.albumId.isNotBlank()) {
-                onDismiss()
-                navController.navigate(albumRoute(song.album, song.singer, song.albumId))
-            }
-            ImmersiveSheetRow(Icons.Rounded.Person, stringResource(R.string.context_menu_browse_artist), enabled = song.singer.isNotBlank()) {
-                onDismiss()
-                playerViewModel.goToArtist(song.spotifyTrackId, song.singer) { route -> navController.navigate(route) }
-            }
-            ImmersiveSheetRow(Icons.Rounded.Info, stringResource(R.string.track_credits), enabled = hasId) { showCredits = true }
+        ImmersiveSheetRow(Icons.Rounded.Album, stringResource(R.string.context_menu_browse_album), enabled = !isRadio && (song.album.isNotBlank() || song.albumId.isNotBlank())) {
+            onDismiss()
+            navController.navigate(albumRoute(song.album, song.singer, song.albumId))
         }
-
+        ImmersiveSheetRow(Icons.Rounded.Person, stringResource(R.string.context_menu_browse_artist), enabled = !isRadio && song.singer.isNotBlank()) {
+            onDismiss()
+            playerViewModel.goToArtist(song.spotifyTrackId, song.singer) { route -> navController.navigate(route) }
+        }
+        ImmersiveSheetRow(Icons.Rounded.Info, stringResource(R.string.track_credits), enabled = hasId) { showCredits = true }
+        }
+        ImmersiveSheetRow(Icons.Rounded.Info, stringResource(R.string.track_credits), enabled = hasId) { showCredits = true }
+>>>>>>> upstream/main
         if (nowPlaying && hasId && !song.url.startsWith("episode:")) {
             ImmersiveSheetRow(Icons.Rounded.Lightbulb, stringResource(R.string.lyrics_meaning_title)) { showMeaning = true }
         }
@@ -285,6 +293,65 @@ fun ImmersiveSongOptionsSheet(
             }
         }
 
+        val trackUri = "spotify:track:${song.spotifyTrackId}"
+        val excluded by produceState<Boolean?>(null, trackUri) {
+            value = if (!hasId) null else runCatching { app.myspoti.host.android.MyspotiRuntime.api.extras.isExcludedFromTaste(listOf(trackUri)).single() }.getOrNull()
+        }
+        ImmersiveSheetRow(Icons.Rounded.Block, stringResource(if (excluded == true) R.string.include_taste else R.string.exclude_taste), enabled = hasId && excluded != null) {
+            val exclude = excluded != true
+            app.myspoti.host.android.MyspotiRuntime.scope.launch {
+                runCatching { app.myspoti.host.android.MyspotiRuntime.api.extras.setExcludedFromTaste(trackUri, exclude) }
+            }
+            Haptics.confirm()
+            onDismiss()
+        }
+        val artistBan by produceState<Pair<String, Boolean>?>(null, trackUri) {
+            if (!hasId) return@produceState
+            val api = app.myspoti.host.android.MyspotiRuntime.api
+            value = runCatching {
+                val artist = api.catalog.track(trackUri).artists.first().uri
+                artist to api.extras.isArtistBanned(listOf(artist)).single()
+            }.getOrNull()
+        }
+        ImmersiveSheetRow(Icons.Rounded.Block, stringResource(if (artistBan?.second == true) R.string.artist_unban else R.string.artist_ban), enabled = artistBan != null) {
+            val (artist, banned) = artistBan ?: return@ImmersiveSheetRow
+            app.myspoti.host.android.MyspotiRuntime.scope.launch {
+                runCatching { app.myspoti.host.android.MyspotiRuntime.api.extras.setArtistBanned(artist, !banned) }
+            }
+            toast(context.getString(if (banned) R.string.artist_unbanned else R.string.artist_banned, song.singer.substringBefore(",").trim()))
+            Haptics.confirm()
+            onDismiss()
+        }
+        if (song.url.startsWith("episode:")) {
+            val episodeUri = "spotify:episode:" + song.url.removePrefix("episode:")
+            val saved by produceState<Boolean?>(null, episodeUri) {
+                value = runCatching { app.myspoti.host.android.MyspotiRuntime.api.library.contains(listOf(episodeUri)).single() }.getOrNull()
+            }
+            ImmersiveSheetRow(Icons.Rounded.Bookmark, stringResource(if (saved == true) R.string.episode_unsave else R.string.episode_save), enabled = saved != null) {
+                val save = saved != true
+                app.myspoti.host.android.MyspotiRuntime.scope.launch {
+                    runCatching { app.myspoti.host.android.MyspotiRuntime.api.podcasts.setEpisodeSaved(episodeUri, save) }
+                }
+                Haptics.confirm()
+                onDismiss()
+            }
+        }
+        if (nowPlaying && song.url.startsWith("episode:")) {
+            ImmersiveSheetRow(Icons.Rounded.Speed, stringResource(R.string.playback_speed)) { showSpeed = true }
+        }
+        // The app's own playback (extensions, downloads, files): its equalizer, speed and silences.
+        if (nowPlaying && com.music.spotui.di.LocalPlayer.active.value) {
+            ImmersiveSheetRow(Icons.Rounded.GraphicEq, stringResource(R.string.equalizer_title)) {
+                onDismiss()
+                navController.navigate(com.music.spotui.ui.navigation.Routes.Equalizer.route)
+            }
+        }
+        ImmersiveSheetRow(Icons.Rounded.Share, stringResource(R.string.context_menu_share), enabled = hasId || isRadio) {
+            // A station has no Spotify uri: shared as plain text, never through a Spotify Code.
+            if (isRadio) com.music.spotui.radio.RadioPlayer.share(context)
+            else SpotifyCode.show(ShareTarget("spotify:track:${song.spotifyTrackId}", song.title, song.singer, song.coverUri))
+            onDismiss()
+        }
         if (nowPlaying) {
             ImmersiveSheetRow(
                 Icons.Rounded.Bedtime,
@@ -300,6 +367,14 @@ fun ImmersiveSongOptionsSheet(
                 com.music.spotui.car.CarModeManager.enterCarMode(context)
                 navController.navigate(com.music.spotui.ui.navigation.Routes.CarMode.route)
             }
+            // The player's source line and capsule are turned off: their sheets are here instead.
+            if (!com.music.spotui.data.preferences.PlayerSourceLinePref.shown) {
+                ImmersiveSheetRow(Icons.Rounded.GraphicEq, stringResource(R.string.quality_sheet_title)) { showQuality = true }
+            }
+            if (!com.music.spotui.data.preferences.PlayerCapsulePref.shown) {
+                ImmersiveSheetRow(Icons.Rounded.Devices, stringResource(R.string.listen_on)) { showDevices = true }
+            }
+            ImmersiveSheetRow(Icons.Rounded.Analytics, stringResource(R.string.nerd_title)) { showNerd = true }
         }
 
         // Extension menu entries

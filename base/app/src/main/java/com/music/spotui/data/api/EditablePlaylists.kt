@@ -4,6 +4,8 @@ import app.myspoti.api.LibraryFilter
 import app.myspoti.api.MediaKind
 import app.myspoti.api.best
 import app.myspoti.host.android.MyspotiRuntime
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * A playlist the user can add tracks to, for the "Add to playlist" pickers. With a
@@ -25,9 +27,13 @@ object EditablePlaylists {
     @Volatile private var idsAt = 0L
     private const val IDS_TTL_MS = 5 * 60_000L
 
-    fun clearSession() {
-        ids = null
-        idsAt = 0L
+    /** Sign-out: nothing of the account's playlists is kept. */
+    fun clear() {
+        shown.clear(); covers.clear(); ids = null; idsAt = 0L
+        prefs().edit().clear().apply()
+    }
+
+    fun clearSession() = clear()
     }
 
     suspend fun ids(): Set<String> {
@@ -48,10 +54,11 @@ object EditablePlaylists {
      * mosaic of its albums); the library has it, so those are read from there, folders walked.
      */
     suspend fun loadWithCovers(): List<EditablePlaylist> {
-        val list = load()
-        if (list.all { it.imageUrl != null }) return list
-        val covers = libraryCovers()
+        // Not read (offline, the page reloading): the last list rather than none.
+        val list = load().ifEmpty { return cachedWithCovers().orEmpty() }
+        if (list.any { it.imageUrl == null && !covers.containsKey("spotify:playlist:${it.id}") }) covers.putAll(libraryCovers())
         return list.map { if (it.imageUrl != null) it else it.copy(imageUrl = covers["spotify:playlist:${it.id}"]) }
+            .also { keep(ALL, it) }
     }
 
     /** Playlist uri → cover, as the library shows them, folders included. */
@@ -83,17 +90,18 @@ object EditablePlaylists {
      */
     suspend fun level(folderUri: String?): List<EditablePlaylist> {
         val api = MyspotiRuntime.api
-        val editable = runCatching { api.playlists.editable() }.getOrNull()?.associateBy { it.uri } ?: return load()
+        val editable = runCatching { api.playlists.editable() }.getOrNull()?.associateBy { it.uri } ?: return cachedLevel(folderUri) ?: load()
         val items = ArrayList<app.myspoti.api.LibraryItem>()
-        runCatching {
+        val read = runCatching {
             var offset = 0
             repeat(40) {
                 val page = api.library.items(filter = LibraryFilter.ALL, folderUri = folderUri, offset = offset, limit = 50)
                 items += page.items
                 offset = page.nextOffset ?: return@runCatching
             }
-        }.onFailure { if (items.isEmpty()) return if (folderUri == null) load() else emptyList() }
-        return items.mapNotNull { item ->
+        }
+        if (read.isFailure && items.isEmpty()) return cachedLevel(folderUri) ?: if (folderUri == null) load() else emptyList()
+        val list = items.mapNotNull { item ->
             when (item.kind) {
                 MediaKind.FOLDER -> EditablePlaylist(item.uri, item.name, item.count ?: 0, null, folderUri = item.uri)
                 MediaKind.PLAYLIST -> editable[item.uri]?.let {
@@ -103,5 +111,9 @@ object EditablePlaylists {
                 else -> null
             }
         }
+        // A read cut short does not replace the whole list (reported: not all the playlists shown).
+        if (read.isFailure) return cachedLevel(folderUri) ?: list
+        keep(folderUri ?: ROOT, list)
+        return list
     }
 }
