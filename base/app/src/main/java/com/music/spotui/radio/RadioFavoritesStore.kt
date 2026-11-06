@@ -37,9 +37,9 @@ object RadioFavoritesStore {
     /** The favorites become [f]'s, and every change is saved to it from then on; [init] does it off the main thread. */
     internal fun load(f: File) {
         synchronized(lock) {
+            file = f
             favorites.clear()
             if (f.exists()) runCatching { read(f.readText()) }
-            file = f
         }
     }
 
@@ -65,7 +65,10 @@ object RadioFavoritesStore {
             change()
             val f = file ?: return
             val tmp = File(f.parentFile, f.name + ".tmp")
-            runCatching { tmp.writeText(write()); tmp.renameTo(f) }
+            runCatching {
+                tmp.writeText(write())
+                java.nio.file.Files.move(tmp.toPath(), f.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
         }
     }
 

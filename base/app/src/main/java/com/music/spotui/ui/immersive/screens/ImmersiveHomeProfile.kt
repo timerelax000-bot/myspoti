@@ -22,6 +22,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -154,60 +159,132 @@ internal fun ImmersiveProfileSheet(onOpen: (route: String) -> Unit, onDismiss: (
                 )
             }
             HorizontalDivider(color = Immersive.Separator, modifier = Modifier.padding(vertical = 8.dp))
-            SheetRow(stringResource(R.string.settings_title), stringResource(R.string.settings_detail)) {
-                onOpen(Routes.Settings.route)
-            }
-            SheetRow(stringResource(R.string.recap_title), stringResource(R.string.recap_detail)) {
-                onOpen(Routes.Recap.route)
-            }
-            SheetRow(stringResource(R.string.recents_title), stringResource(R.string.recents_detail)) {
-                onOpen(Routes.Recent.route)
-            }
-            // Third-party extensions: installed, enabled, repositories.
-            val extRegistry by com.music.spotui.extensions.Extensions.registry.collectAsState()
-            val installed = extRegistry.extensions
-            SheetRow(
-                stringResource(R.string.extensions_title),
-                if (installed.isEmpty()) stringResource(R.string.extensions_row_detail)
-                else stringResource(R.string.extensions_row_count, installed.size, installed.count { it.enabled }),
+
+            // Section 1: Preferences (Collapsible)
+            var prefExpanded by remember { mutableStateOf(true) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { prefExpanded = !prefExpanded }
+                    .padding(start = Immersive.Gutter, end = Immersive.Gutter, top = 8.dp, bottom = 4.dp),
             ) {
-                onOpen(Routes.Extensions.route)
+                Text("PREFERENCES", style = Immersive.Caption.copy(color = Immersive.Accent, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
+                Icon(
+                    if (prefExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null, tint = Immersive.TextSecondary, modifier = Modifier.size(18.dp),
+                )
             }
-            // The account page (plan, privacy, devices), in the app's signed-in browser.
-            SheetRow(
-                stringResource(R.string.immersive_screens_account_page),
-                stringResource(R.string.immersive_screens_account_page_detail),
-            ) {
-                onDismiss()
-                AccountBrowser.open(Graph.app, AccountBrowser.ACCOUNT_URL)
-            }
-            // Donations: always here, never in the way.
-            var support by remember { mutableStateOf(false) }
-            if (support) SupportSheet(onDismiss = { support = false })
-            SheetRow(
-                stringResource(R.string.support_title),
-                stringResource(R.string.support_row_detail),
-                titleColor = Immersive.Accent,
-            ) { support = true }
-            // About: version, Discord, source code and Ko-fi.
-            var about by remember { mutableStateOf(false) }
-            if (about) AboutSheet(onDismiss = { about = false })
-            SheetRow(stringResource(R.string.creator_biography_section_title), stringResource(R.string.about_detail)) {
-                about = true
-            }
-            var perks by remember { mutableStateOf(false) }
-            if (perks) SupporterSheet(onDismiss = { perks = false })
-            if (SupportReminder.PERKS_ENABLED) {
-                SheetRow(stringResource(R.string.supporter_perks_title), stringResource(R.string.supporter_perks_detail)) {
-                    perks = true
+            AnimatedVisibility(visible = prefExpanded) {
+                Column(Modifier.fillMaxWidth()) {
+                    SheetRow(stringResource(R.string.settings_title), stringResource(R.string.settings_detail)) {
+                        onOpen(Routes.Settings.route)
+                    }
                 }
             }
-            // The other Spotify accounts kept on the phone: switch, add, remove.
-            var accounts by remember { mutableStateOf(false) }
-            if (accounts) com.music.spotui.ui.components.AccountsSheet(onDismiss = { accounts = false }, onLeave = { accounts = false; onDismiss() })
-            SheetRow(stringResource(R.string.accounts_switch_row), com.music.spotui.ui.components.switchAccountDetail()) {
-                accounts = true
+
+            HorizontalDivider(color = Immersive.Separator, modifier = Modifier.padding(vertical = 8.dp))
+
+            // Section 2: Account & Extensions (Collapsible)
+            var accountExpanded by remember { mutableStateOf(false) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { accountExpanded = !accountExpanded }
+                    .padding(start = Immersive.Gutter, end = Immersive.Gutter, top = 8.dp, bottom = 4.dp),
+            ) {
+                Text("ACCOUNT & EXTENSIONS", style = Immersive.Caption.copy(color = Immersive.Accent, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
+                Icon(
+                    if (accountExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null, tint = Immersive.TextSecondary, modifier = Modifier.size(18.dp),
+                )
             }
+            AnimatedVisibility(visible = accountExpanded) {
+                Column(Modifier.fillMaxWidth()) {
+                    // Switch accounts
+                    var accounts by remember { mutableStateOf(false) }
+                    if (accounts) com.music.spotui.ui.components.AccountsSheet(onDismiss = { accounts = false }, onLeave = { accounts = false; onDismiss() })
+                    SheetRow(stringResource(R.string.accounts_switch_row), com.music.spotui.ui.components.switchAccountDetail()) {
+                        accounts = true
+                    }
+
+                    // Account page
+                    SheetRow(
+                        stringResource(R.string.immersive_screens_account_page),
+                        stringResource(R.string.immersive_screens_account_page_detail),
+                    ) {
+                        onDismiss()
+                        AccountBrowser.open(Graph.app, AccountBrowser.ACCOUNT_URL)
+                    }
+
+                    // Extensions
+                    val extRegistry by com.music.spotui.extensions.Extensions.registry.collectAsState()
+                    val installed = extRegistry.extensions
+                    SheetRow(
+                        stringResource(R.string.extensions_title),
+                        if (installed.isEmpty()) stringResource(R.string.extensions_row_detail)
+                        else stringResource(R.string.extensions_row_count, installed.size, installed.count { it.enabled }),
+                    ) {
+                        onOpen(Routes.Extensions.route)
+                    }
+
+                    // Support Myspoti
+                    var support by remember { mutableStateOf(false) }
+                    if (support) SupportSheet(onDismiss = { support = false })
+                    SheetRow(
+                        stringResource(R.string.support_title),
+                        stringResource(R.string.support_row_detail),
+                        titleColor = Immersive.Accent,
+                    ) { support = true }
+
+                    // About Myspoti
+                    var about by remember { mutableStateOf(false) }
+                    if (about) AboutSheet(onDismiss = { about = false })
+                    SheetRow(stringResource(R.string.creator_biography_section_title), stringResource(R.string.about_detail)) {
+                        about = true
+                    }
+
+                    var perks by remember { mutableStateOf(false) }
+                    if (perks) SupporterSheet(onDismiss = { perks = false })
+                    if (SupportReminder.PERKS_ENABLED) {
+                        SheetRow(stringResource(R.string.supporter_perks_title), stringResource(R.string.supporter_perks_detail)) {
+                            perks = true
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = Immersive.Separator, modifier = Modifier.padding(vertical = 8.dp))
+
+            // Section 3: Activity & History (Collapsible)
+            var activityExpanded by remember { mutableStateOf(false) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { activityExpanded = !activityExpanded }
+                    .padding(start = Immersive.Gutter, end = Immersive.Gutter, top = 8.dp, bottom = 4.dp),
+            ) {
+                Text("ACTIVITY & HISTORY", style = Immersive.Caption.copy(color = Immersive.Accent, fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
+                Icon(
+                    if (activityExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null, tint = Immersive.TextSecondary, modifier = Modifier.size(18.dp),
+                )
+            }
+            AnimatedVisibility(visible = activityExpanded) {
+                Column(Modifier.fillMaxWidth()) {
+                    SheetRow(stringResource(R.string.recap_title), stringResource(R.string.recap_detail)) {
+                        onOpen(Routes.Recap.route)
+                    }
+                    SheetRow(stringResource(R.string.recents_title), stringResource(R.string.recents_detail)) {
+                        onOpen(Routes.Recent.route)
+                    }
+                }
+            }
+
+            HorizontalDivider(color = Immersive.Separator, modifier = Modifier.padding(vertical = 8.dp))
+
             SheetRow(stringResource(R.string.connect_device_menu_logout), null) {
                 onDismiss()
                 SessionActions.logout(Graph.app)

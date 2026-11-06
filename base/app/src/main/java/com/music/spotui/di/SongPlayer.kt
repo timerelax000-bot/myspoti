@@ -427,7 +427,6 @@ object SongPlayer {
             android.widget.Toast.makeText(Graph.app, app.myspoti.engine.R.string.drm_missing, android.widget.Toast.LENGTH_LONG).show()
         }
         scope.launch {
->>>>>>> upstream/main
             MyspotiRuntime.host.licenseLimitedUntil.collect { until ->
                 if (until > SystemClock.elapsedRealtime()) main.post {
                     playing = false
@@ -1839,13 +1838,7 @@ object SongPlayer {
     }
 
     fun pause(by: String = "user") {
-<<<<<<< HEAD
-        val now = SystemClock.elapsedRealtime()
-        if (now - lastPauseTapAt < 180L) return
-        lastPauseTapAt = now
-=======
         if (by != BY_CALL) callPause.userActed()
->>>>>>> upstream/main
         app.myspoti.host.android.Logbook.log("pause asked by $by")
         userActed()
         Haptics.click(); cancelBurst(); pauseSilently()
@@ -3433,12 +3426,7 @@ object SongPlayer {
             null
         }
 
-<<<<<<< HEAD
-    // Media cache for the looping Canvas video on the now-playing screen.
-    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-=======
     // Media cache for the looping Canvas video on the now-playing screen, sized as Settings > Storage says (at its first use).
->>>>>>> upstream/main
     @Volatile private var mediaCache: androidx.media3.datasource.cache.SimpleCache? = null
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)

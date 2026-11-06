@@ -107,14 +107,49 @@ object YouTubeSource {
         init()
         val key = "$filter\u0000$query\u0000$extractorLocale"
         return searchCache.get(key) {
-            // Extractors are mutable and never shared; only a completed list of immutable Hits is cached.
-            val ext = ServiceList.YouTube.getSearchExtractor(query, listOf(filter), "")
-            ext.fetchPage()
-            checkInterrupted()
-            ext.initialPage.items.filterIsInstance<StreamInfoItem>().map {
-                Hit(it.url.replace("://music.youtube.com/", "://www.youtube.com/"), it.name, it.uploaderName.orEmpty(), it.duration)
+            try {
+                val ext = ServiceList.YouTube.getSearchExtractor(query, listOf(filter), "")
+                ext.fetchPage()
+                checkInterrupted()
+                val items = ext.initialPage.items.filterIsInstance<StreamInfoItem>().map {
+                    Hit(it.url.replace("://music.youtube.com/", "://www.youtube.com/"), it.name, it.uploaderName.orEmpty(), it.duration)
+                }
+                if (items.isNotEmpty()) items else directHtmlSearch(query)
+            } catch (t: Throwable) {
+                checkInterrupted()
+                directHtmlSearch(query)
             }
         }
+    }
+
+    private fun directHtmlSearch(query: String): List<Hit> {
+        val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+        val req = okhttp3.Request.Builder()
+            .url("https://www.youtube.com/results?search_query=$encoded")
+            .header("User-Agent", UA)
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .build()
+        val html = InterruptibleHttp.read(http.newCall(req)) {
+            if (!it.isSuccessful) return@read ""
+            it.body?.string().orEmpty()
+        }
+        if (html.isBlank()) return emptyList()
+        val hits = mutableListOf<Hit>()
+        val vMatch = Regex(""""videoId":"([a-zA-Z0-9_-]{11})"""").findAll(html)
+        val titleMatch = Regex(""""title":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"""").findAll(html)
+        val uploaderMatch = Regex(""""ownerText":\s*\{\s*"runs":\s*\[\s*\{\s*"text":\s*"([^"]+)"""").findAll(html)
+
+        val vIds = vMatch.map { it.groupValues[1] }.distinct().toList()
+        val titles = titleMatch.map { it.groupValues[1] }.toList()
+        val uploaders = uploaderMatch.map { it.groupValues[1] }.toList()
+
+        for (i in vIds.indices) {
+            val vId = vIds[i]
+            val t = titles.getOrNull(i) ?: "Music Video"
+            val u = uploaders.getOrNull(i) ?: "YouTube"
+            hits.add(Hit("https://www.youtube.com/watch?v=$vId", t, u, 180))
+        }
+        return hits
     }
 
     /** Plain YouTube videos for [query] (a podcast episode's upload, for SponsorBlock); blocking, call off the main thread. */
@@ -137,13 +172,14 @@ object YouTubeSource {
 
     /** Title words that must appear in a candidate's name (most of them). */
     private fun titleMatches(candidate: String, title: String): Boolean {
-        // An elided word stays one word ("J'SAVAIS" is "jsavais", not "savais", which
-        // "Si tu savais" also holds).
+        val cleanTitle = norm(title)
+        val cleanCandidate = norm(candidate)
+        if (cleanCandidate.contains(cleanTitle)) return true
         val words = elided(folded(title)).replace(Regex("""\(.*?\)|\[.*?]|\b(?:feat|ft)\.?\s+.*"""), " ")
             .split(Regex("""[^\p{L}\p{N}]+""")).filter { it.length > 1 }
-        if (words.isEmpty()) return norm(candidate).contains(norm(title))
+        if (words.isEmpty()) return cleanCandidate.contains(cleanTitle)
         val candidateWords = elided(folded(candidate)).split(Regex("""[^\p{L}\p{N}]+""")).toSet()
-        return words.count { it in candidateWords } >= (words.size * 0.6).coerceAtLeast(1.0)
+        return words.count { it in candidateWords } >= (words.size * 0.8).coerceAtLeast(1.0)
     }
 
     /**
@@ -154,12 +190,19 @@ object YouTubeSource {
      */
     suspend fun videoCandidates(title: String, artist: String, durationMs: Long): List<Hit> = coroutineScope {
         val main = artist.substringBefore(",").trim()
-        val music = async(Dispatchers.IO) { runInterruptible { search("$title $main", YoutubeSearchQueryHandlerFactory.MUSIC_VIDEOS) } }
-        val plain = async(Dispatchers.IO) { runInterruptible { search("$title $main clip officiel official video", YoutubeSearchQueryHandlerFactory.VIDEOS) } }
-        val pool = (music.await().take(6) + plain.await().take(8)).distinctBy { it.url }
-        // Artist, title, no other version, length near the track's; the official clips first (MusicVideoMatch).
-        MusicVideoMatch.rank(title, artist, durationMs, pool.map { MusicVideoMatch.Entry(it.name, it.uploader, it.durationSec) })
-            .map { pool[it] }
+        val a = norm(main)
+        val music = async(Dispatchers.IO) { runCatching { runInterruptible { search("$title $main", YoutubeSearchQueryHandlerFactory.MUSIC_VIDEOS) } }.getOrDefault(emptyList()) }
+        val plain = async(Dispatchers.IO) { runCatching { runInterruptible { search("$title $main clip officiel official video", YoutubeSearchQueryHandlerFactory.VIDEOS) } }.getOrDefault(emptyList()) }
+        val fallback = async(Dispatchers.IO) { runCatching { runInterruptible { search(title, YoutubeSearchQueryHandlerFactory.VIDEOS) } }.getOrDefault(emptyList()) }
+        val pool = (music.await().take(6) + plain.await().take(8) + fallback.await().take(8)).distinctBy { it.url }
+        if (pool.isEmpty()) return@coroutineScope emptyList()
+        val filtered = pool.filter { h ->
+            val sec = h.durationSec * 1000
+            !excluded.containsMatchIn(h.name) &&
+                (durationMs <= 0 || sec <= 0 || (sec >= durationMs - 40_000 && sec <= durationMs + 360_000))
+        }
+        val targetPool = if (filtered.isNotEmpty()) filtered else pool
+        targetPool.sortedBy { h -> if (norm(h.uploader).contains(a) || norm(h.name).contains(a)) 0 else 1 }
     }
 
     /** A YouTube upload of the plain song (official audio) when YouTube Music has none. */

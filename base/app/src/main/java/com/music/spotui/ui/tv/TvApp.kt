@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -141,7 +142,7 @@ internal fun TvFrame(tab: TvTab, onSelect: (TvTab) -> Unit, page: @Composable ()
         TvTab.Search to stringResource(R.string.navigationbar_musicappitems_search_title),
         TvTab.NowPlaying to stringResource(R.string.immersive_shell_now_playing),
     )
-    Box(Modifier.fillMaxSize().background(TvBg)) {
+    Box(Modifier.fillMaxSize().background(TvBg).systemBarsPadding()) {
         // The player runs under the bar to the top of the screen; the other pages start below it.
         Box(Modifier.fillMaxSize().padding(top = if (tab == TvTab.NowPlaying) 0.dp else 72.dp)) { page() }
         TvTopBar(tab, labels, onSelect, Modifier.align(Alignment.TopCenter))

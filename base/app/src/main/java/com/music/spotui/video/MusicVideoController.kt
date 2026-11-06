@@ -308,13 +308,16 @@ object MusicVideoController {
         refineJob?.cancel()
         discardRetained()
         wantVideo = wantVideo || on.value
-        if (on.value) { on.value = false; fullscreen.value = false; syncJob?.cancel() }
+        if (!wantVideo) { fullscreen.value = false; syncJob?.cancel() }
         warmedFor = null
         player?.let { it.stop(); it.clearMediaItems() }
         // Back on a song already answered: its stored answer is used at once, nothing is looked up again.
         recentAnswer(trackId)?.let { hit ->
             state.value = hit
-            if (hit is State.Ready) { preloadStream(hit.videoUrl); resumeWanted() }
+            if (hit is State.Ready) {
+                preloadStream(hit.videoUrl)
+                if (wantVideo) { on.value = true; start(hit) } else resumeWanted()
+            }
             return
         }
         // A look-up that failed less than 30 s ago waits, even when the song was left and came back.
@@ -339,12 +342,22 @@ object MusicVideoController {
                 if (result == null) {
                     nextPrepareAt = SystemClock.elapsedRealtime() + 30_000
                     markFailed(trackId)
-                    state.value = State.Idle
+                    state.value = State.Unavailable
+                    if (on.value) {
+                        on.value = false
+                        wantVideo = false
+                        scope.launch(Dispatchers.Main) {
+                            runCatching { android.widget.Toast.makeText(app, "No official music video found", android.widget.Toast.LENGTH_SHORT).show() }
+                        }
+                    }
                     return@launch
                 }
                 state.value = result
                 published = true
-                if (result is State.Ready) { preloadStream(result.videoUrl); resumeWanted() }
+                if (result is State.Ready) {
+                    preloadStream(result.videoUrl)
+                    if (wantVideo) { on.value = true; start(result) } else resumeWanted()
+                }
             } catch (t: kotlinx.coroutines.CancellationException) {
                 throw t
             } catch (t: Throwable) {
@@ -668,13 +681,24 @@ object MusicVideoController {
     }
 
     fun setOn(value: Boolean) {
-        val s = state.value
-        if (value && s !is State.Ready) return
-        com.music.spotui.di.Haptics.click()
         wantVideo = value
-        on.value = value
-        if (!value) { fullscreen.value = false; stop(); return }
-        start(s as State.Ready)
+        com.music.spotui.di.Haptics.click()
+        if (!value) {
+            fullscreen.value = false
+            on.value = false
+            stop()
+            return
+        }
+        val s = state.value
+        if (s is State.Ready) {
+            on.value = true
+            start(s)
+        } else {
+            on.value = true
+            if (currentTrackId.isNotBlank()) {
+                prepare(currentTrackId, currentTitle, currentArtist, currentDuration)
+            }
+        }
     }
 
     private fun ensurePlayer(): ExoPlayer = player ?: ExoPlayer.Builder(app)

@@ -23,23 +23,71 @@ data class EditablePlaylist(
 
 object EditablePlaylists {
     /** Ids of the playlists this account can change, read at most every [IDS_TTL_MS]. */
-    @Volatile private var ids: Set<String>? = null
+    @Volatile private var cachedIds: Set<String>? = null
     @Volatile private var idsAt = 0L
     private const val IDS_TTL_MS = 5 * 60_000L
 
+    /**
+     * The pickers' last lists ([ALL] for [loadWithCovers], a folder's uri or [ROOT] for [level]):
+     * shown at once while they are read again. Reported: a minute of "Loading playlists" each
+     * time a song was saved to a playlist (#145).
+     */
+    private val shown = java.util.concurrent.ConcurrentHashMap<String, List<EditablePlaylist>>()
+    /** Playlist uri → the library's cover, kept so the library is walked again only for a new playlist. */
+    private val covers = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private const val ALL = "all"
+    private const val ROOT = "root"
+
+    /** What [loadWithCovers] gave last, or null. */
+    fun cachedWithCovers(): List<EditablePlaylist>? = kept(ALL)
+
+    /** What [level] gave last for [folderUri], or null. */
+    fun cachedLevel(folderUri: String?): List<EditablePlaylist>? = kept(folderUri ?: ROOT)
+
+    private const val PREF = "playlist_pickers"
+    private fun prefs() = com.music.spotui.di.Graph.app.getSharedPreferences(PREF, android.content.Context.MODE_PRIVATE)
+
+    /**
+     * The last list, from the disk after a restart. Kept in memory only, every first picker of a
+     * session waited for the whole library (reported: 5-6 s of "Loading playlists", on the build
+     * that showed the last list at once).
+     */
+    private fun kept(key: String): List<EditablePlaylist>? =
+        shown[key] ?: prefs().getString(key, null)?.let(::decodeList)?.also { shown[key] = it }
+
+    private fun keep(key: String, list: List<EditablePlaylist>) {
+        if (shown.put(key, list) != list) prefs().edit().putString(key, encodeList(list)).apply()
+    }
+
+    internal fun encodeList(list: List<EditablePlaylist>): String = JSONArray().apply {
+        list.forEach { p ->
+            put(JSONObject().put("id", p.id).put("name", p.name).put("count", p.trackCount)
+                .put("image", p.imageUrl ?: JSONObject.NULL).put("folder", p.folderUri ?: JSONObject.NULL))
+        }
+    }.toString()
+
+    /** Null when unreadable: the list is read from Spotify as if never kept. */
+    internal fun decodeList(raw: String): List<EditablePlaylist>? = runCatching {
+        val a = JSONArray(raw)
+        (0 until a.length()).map { i ->
+            val o = a.getJSONObject(i)
+            EditablePlaylist(o.getString("id"), o.getString("name"), o.getInt("count"),
+                o.optString("image").takeUnless { o.isNull("image") }, o.optString("folder").takeUnless { o.isNull("folder") })
+        }
+    }.getOrNull()
+
     /** Sign-out: nothing of the account's playlists is kept. */
     fun clear() {
-        shown.clear(); covers.clear(); ids = null; idsAt = 0L
+        shown.clear(); covers.clear(); cachedIds = null; idsAt = 0L
         prefs().edit().clear().apply()
     }
 
     fun clearSession() = clear()
-    }
 
     suspend fun ids(): Set<String> {
         val now = System.currentTimeMillis()
-        ids?.takeIf { now - idsAt < IDS_TTL_MS }?.let { return it }
-        return runCatching { load().mapTo(HashSet()) { it.id } }.getOrNull()?.also { ids = it; idsAt = now } ?: ids.orEmpty()
+        cachedIds?.takeIf { now - idsAt < IDS_TTL_MS }?.let { return it }
+        return runCatching { load().mapTo(HashSet()) { it.id } }.getOrNull()?.also { cachedIds = it; idsAt = now } ?: cachedIds.orEmpty()
     }
 
     /** The user's own and collaborative playlists, in library order, folders flattened. */

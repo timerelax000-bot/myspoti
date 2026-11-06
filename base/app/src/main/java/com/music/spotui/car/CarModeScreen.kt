@@ -122,7 +122,7 @@ fun CarModeScreen(
                 },
                 onToggleShuffle = {
                     val sh = !currentSongState.shuffle.value
-                    currentSongState.updateShuffleState(sh)
+                    currentSongState.shuffle.value = sh
                     SongPlayer.setShuffle(sh)
                 },
                 onOpenQueue = { showQueue = true },
@@ -149,7 +149,7 @@ fun CarModeScreen(
                 },
                 onToggleShuffle = {
                     val sh = !currentSongState.shuffle.value
-                    currentSongState.updateShuffleState(sh)
+                    currentSongState.shuffle.value = sh
                     SongPlayer.setShuffle(sh)
                 },
                 onOpenQueue = { showQueue = true },
@@ -739,10 +739,6 @@ private fun CarVoiceModal(
 private fun CarQueueSheet(
     onClose: () -> Unit,
 ) {
-    DisposableEffect(Unit) {
-        SongPlayer.watchQueue(true)
-        onDispose { SongPlayer.watchQueue(false) }
-    }
     val q by SongPlayer.engineQueue
 
     Box(

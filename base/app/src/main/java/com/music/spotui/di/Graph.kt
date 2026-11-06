@@ -18,19 +18,12 @@ object Graph {
         // Multi-Account manager: initialize account list synchronously before starting runtime
         runCatching { com.music.spotui.data.AccountStore.initSync(application) }
         val activeAccount = com.music.spotui.data.AccountStore.activeAccount.value
-        val activeProfile = activeAccount?.webViewProfileName
         com.music.spotui.data.api.ScreenCache.setAccount(activeAccount?.spotifyUserId)
-        MyspotiRuntime.onSessionReset = {
-            com.music.spotui.data.api.ProfileCache.clearSession()
-            com.music.spotui.data.api.Api.HomeCache.clear()
-            com.music.spotui.data.api.ScreenCache.clear()
-            com.music.spotui.data.api.EditablePlaylists.clearSession()
-        }
         // The data saver first: on a metered network with it on, nothing may go out, not even the page.
         com.music.spotui.data.DataSaver.init(application)
         com.music.spotui.data.CanvasNetworkPolicy.init(application)
         // The Spotify session: hidden Web Player + API (operation hashes refresh themselves).
-        MyspotiRuntime.start(application, loadPage = !com.music.spotui.data.DataSaver.active, profileName = activeProfile)
+        MyspotiRuntime.start(application, loadPage = !com.music.spotui.data.DataSaver.active)
         // The streaming quality the user chose, set on the player at every page load.
         com.music.spotui.data.preferences.applyStreamingQuality(application)
         // The crossfade length (0 = off), in the player from the first song on.

@@ -68,13 +68,13 @@ class CarVoiceCommander(private val context: Context) {
                         }
                         val message = when (error) {
                             SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
-                            SpeechRecognizer.ERROR_CLIENT -> "Client error"
+                            SpeechRecognizer.ERROR_CLIENT -> "Didn't catch that. Tap mic to try again."
                             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required"
                             SpeechRecognizer.ERROR_NETWORK -> "Network connection required"
-                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech match found"
-                            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recognition service busy"
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech input detected"
-                            else -> "Recognition error ($error)"
+                            SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized. Try again."
+                            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Voice recognition busy"
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Listening timed out. Tap mic to try again."
+                            else -> "Voice recognition error. Tap mic to try again."
                         }
                         _state.value = VoiceState.Error(message)
                     }

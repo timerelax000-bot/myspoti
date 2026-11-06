@@ -104,7 +104,7 @@ object MyspotiRuntime {
                 // The account's plan (AccountPlan: Premium turns the ad machinery off), asked while it is not
                 // known, once the page is signed in; forgotten at a sign-out (below). Its log line is the first
                 // thing a refused play (402) needs. No name, no id, only what decides what the account may play.
-                if (spotify.ready.value && runCatching { isSignedIn() }.getOrDefault(false)) {
+                if (spotify.ready.value && (try { isSignedIn() } catch (_: Throwable) { false })) {
                     host.noteSignedIn(fresh = sawSignedOut)
                     val now = android.os.SystemClock.elapsedRealtime()
                     if (AccountPlan.premium.value == null && (planAskedAt == 0L || now - planAskedAt >= PLAN_ASK_GAP_MS)) {
@@ -160,45 +160,10 @@ object MyspotiRuntime {
         }
     }
 
-<<<<<<< HEAD
-    var onSessionReset: (() -> Unit)? = null
-    var onHostRecreated: ((WebPlayerHost) -> Unit)? = null
-
-    fun switchAccount(context: Context, profileName: String?) {
-        var oldContainer: android.view.ViewGroup? = null
-        var oldVisible = false
-        runCatching {
-            if (isStarted) {
-                oldContainer = host.container
-                oldVisible = host.lastVisible
-                scope.launch { runCatching { spotify.player.pause() } }
-                host.flushCookies()
-                host.destroy()
-            }
-        }
-        onSessionReset?.invoke()
-        val updater = app.myspoti.spotify.gql.GqlOpsUpdater(okhttp3.OkHttpClient(), java.io.File(context.filesDir, "spotify/gql-ops.json"))
-        host = WebPlayerHost(context, profileName = profileName)
-        oldContainer?.let { host.attach(it, oldVisible) }
-        onHostRecreated?.invoke(host)
-        spotify = SpotifyApi(host, scope, language = Locale.getDefault().language, ops = updater.load(), deviceId = clientDeviceId(context), userAgent = host.userAgent)
-        spotify.bridge.logger = { line -> Logbook.log(line) }
-        host.onPageLoaded = { scope.launch { spotify.onPageLoaded() } }
-        host.onPageStarting = { spotify.onPageStarting() }
-        spotify.player.reloadHost = { host.reload() }
-        spotify.player.recoveryHeld = { host.licenseLimited() || host.loginRequired.value }
-        spotify.player.playbackHeld = { host.licenseLimited() }
-        host.load()
-    }
-
-    /** True when the Web Player holds a signed-in user's token (not an anonymous one). */
-    /** Never while a Spotify sign-in page is open: whatever a token says, the user is mid sign-in. */
-=======
     /**
      * True when the Web Player holds a signed-in user's token (not an anonymous one), and never
      * while a Spotify sign-in page is open: whatever a token says, the user is mid sign-in.
      */
->>>>>>> upstream/main
     suspend fun isSignedIn(): Boolean = !host.loginRequired.value && spotify.isSignedIn()
 
     /**
@@ -209,10 +174,10 @@ object MyspotiRuntime {
     suspend fun awaitSignedIn(timeoutMs: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            if (runCatching { isSignedIn() }.getOrDefault(false)) return true
+            if (try { isSignedIn() } catch (_: Throwable) { false }) return true
             kotlinx.coroutines.delay(500)
         }
-        return runCatching { isSignedIn() }.getOrDefault(false)
+        return try { isSignedIn() } catch (_: Throwable) { false }
     }
 
     /** When the account's plan was last asked for (AccountPlan), so a failed or unknown answer is asked again later; 0: at once. */

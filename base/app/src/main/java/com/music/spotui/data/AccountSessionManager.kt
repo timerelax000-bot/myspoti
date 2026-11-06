@@ -184,9 +184,10 @@ object AccountSessionManager {
 
                 withContext(Dispatchers.Main) {
                     if (!MyspotiRuntime.isStarted) {
-                        MyspotiRuntime.start(appContext, loadPage = true, profileName = profileName)
+                        MyspotiRuntime.start(appContext, loadPage = true)
                     } else {
-                        MyspotiRuntime.switchAccount(appContext, profileName = profileName)
+                        MyspotiRuntime.accountChanged()
+                        MyspotiRuntime.host.switchProfile(profileName)
                     }
                 }
                 logStage("WEBVIEW_PROFILE_ASSIGNED", "Assigned profile $profileName to WebView")
@@ -294,7 +295,8 @@ object AccountSessionManager {
             OfflineAccounts.claim(context, recoveryAccount.spotifyUserId)
             ScreenCache.setAccount(recoveryAccount.spotifyUserId)
             if (MyspotiRuntime.isStarted) {
-                MyspotiRuntime.switchAccount(context, profileName = recoveryAccount.webViewProfileName)
+                MyspotiRuntime.accountChanged()
+                MyspotiRuntime.host.switchProfile(recoveryAccount.webViewProfileName)
             }
             ProfileCache.ensure(context)
             logStage("RECOVERY_COMPLETED", "Recovered successfully to ${recoveryAccount.name}")

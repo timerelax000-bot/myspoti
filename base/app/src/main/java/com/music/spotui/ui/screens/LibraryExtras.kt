@@ -557,9 +557,11 @@ fun AddLocalToPlaylistSheet(track: LocalTrack, onDismiss: () -> Unit) {
                     LocalPlaylists.add(p.id, track); added(p.name)
                 }
             }
-            when (val lists = spotifyLists) {
-                null -> item { Text(stringResource(R.string.loading_playlists), color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(20.dp, 12.dp)) }
-                else -> items(lists, key = { "s:" + it.id }) { p ->
+            val lists = spotifyLists
+            if (lists == null) {
+                item { Text(stringResource(R.string.loading_playlists), color = Color.Gray, fontSize = 14.sp, modifier = Modifier.padding(20.dp, 12.dp)) }
+            } else {
+                items(lists, key = { p: com.music.spotui.data.api.EditablePlaylist -> "s:" + p.id }) { p ->
                     PickRow(name = p.name, detail = stringResource(R.string.local_added_section), cover = p.imageUrl) {
                         LocalPlaylists.addToSpotify(p.id, track); added(p.name)
                     }

@@ -88,37 +88,9 @@ fun ImmersiveExperienceSettingsScreen(
                 ImmersiveSettingsPref.setDynamicBackgrounds(context, it)
             }
 
-            // Category 2: Canvas & Performance
-            SettingsSectionHeader(title = "Canvas & Performance", icon = Icons.Rounded.Movie)
-            val autoSaver by ImmersiveSettingsPref.autoCanvasSaverMobileDataEnabled.collectAsState()
-            SwitchSettingRow(
-                "Automatic Canvas Saver on Mobile Data",
-                "Automatically reduces Canvas video quality and prevents unnecessary video downloads when using mobile data.",
-                autoSaver,
-            ) {
-                ImmersiveSettingsPref.setAutoCanvasSaverMobileData(context, it)
-            }
-
-            val qualityLimit by ImmersiveSettingsPref.canvasQualityLimit.collectAsState()
-            ChoiceSettingRow(
-                "Canvas Quality Limit",
-                when (qualityLimit) {
-                    "480p" -> "480p"
-                    "artwork_only" -> "Artwork Only"
-                    else -> "Auto"
-                },
-            ) {
-                val next = when (qualityLimit) {
-                    "auto" -> "480p"
-                    "480p" -> "artwork_only"
-                    else -> "auto"
-                }
-                ImmersiveSettingsPref.setCanvasQualityLimit(context, next)
-            }
-
-            val animatedArt by ImmersiveSettingsPref.animatedArtworkEnabled.collectAsState()
-            SwitchSettingRow("Animated Artwork", "Floating motion, subtle scale and ambient sheen over cover art", animatedArt) {
-                ImmersiveSettingsPref.setAnimatedArtwork(context, it)
+            val visualAndArt by ImmersiveSettingsPref.animatedArtworkAndVisualizerEnabled.collectAsState()
+            SwitchSettingRow("Animated Artwork & Subtle Visualizer", "Floating motion, subtle scale, ambient sheen, and fluid waveform rings", visualAndArt) {
+                ImmersiveSettingsPref.setAnimatedArtworkAndVisualizer(context, it)
             }
 
             val gestureCtrl by ImmersiveSettingsPref.gestureControlsEnabled.collectAsState()
@@ -126,42 +98,11 @@ fun ImmersiveExperienceSettingsScreen(
                 ImmersiveSettingsPref.setGestureControls(context, it)
             }
 
-            val visualizerOn by ImmersiveSettingsPref.visualizerEnabled.collectAsState()
-            SwitchSettingRow("Subtle Visualizer", "Fluid waveform and pulse rings surrounding artwork", visualizerOn) {
-                ImmersiveSettingsPref.setVisualizer(context, it)
-            }
-
-            if (visualizerOn) {
-                val visInt by ImmersiveSettingsPref.visualizerIntensity.collectAsState()
-                ChoiceSettingRow("Visualizer Intensity", visInt.replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.ROOT) else it.toString() }) {
-                    val next = when (visInt) {
-                        "low" -> "medium"
-                        "medium" -> "high"
-                        else -> "low"
-                    }
-                    ImmersiveSettingsPref.setVisualizerIntensity(context, next)
-                }
-            }
-
-            // Category 3: Lyrics
+            // Category 2: Lyrics
             SettingsSectionHeader(title = "Lyrics Engine", icon = Icons.Rounded.Lyrics)
             val autoResolver by ImmersiveSettingsPref.autoResolverEnabled.collectAsState()
             SwitchSettingRow("Automatic Lyrics Resolver", "Auto-select best synchronized lyrics source", autoResolver) {
                 ImmersiveSettingsPref.autoResolverEnabled.value = it
-            }
-
-            // Category 4: Music Video & Audio Handoff
-            SettingsSectionHeader(title = "Music Video & Audio Handoff", icon = Icons.Rounded.OndemandVideo)
-            val smartAudioHandoff by ImmersiveSettingsPref.smartAudioHandoff.collectAsState()
-            SwitchSettingRow("2-Second Long Press Audio Handoff", "Hold video button for 2 seconds to toggle audio between Spotify and Video while keeping video visible", smartAudioHandoff) {
-                ImmersiveSettingsPref.smartAudioHandoff.value = it
-            }
-
-            // Category 5: Performance & Accessibility
-            SettingsSectionHeader(title = "Performance & Accessibility", icon = Icons.Rounded.Speed)
-            val reducedMotion by ImmersiveSettingsPref.reducedMotion.collectAsState()
-            SwitchSettingRow("Reduced Motion", "Simplify animations for lower battery/CPU usage", reducedMotion) {
-                ImmersiveSettingsPref.reducedMotion.value = it
             }
 
             Spacer(Modifier.height(32.dp))
@@ -198,24 +139,5 @@ private fun SwitchSettingRow(
             Text(text = subtitle, fontSize = 13.sp, color = Color.Gray)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-@Composable
-private fun ChoiceSettingRow(
-    title: String,
-    value: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(text = title, fontSize = 15.sp, color = Color.White, fontWeight = FontWeight.Medium)
-        Text(text = value, fontSize = 14.sp, color = Color(0xFF1DB954), fontWeight = FontWeight.SemiBold)
     }
 }

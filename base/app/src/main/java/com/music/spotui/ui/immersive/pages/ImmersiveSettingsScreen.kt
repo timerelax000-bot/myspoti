@@ -169,6 +169,11 @@ private fun SettingsRoot(navController: NavController, open: (SettingsPage) -> U
     BackHandler(enabled = query != null) { query = null }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    var playbackExpanded by rememberSaveable { mutableStateOf(true) }
+    var downloadsExpanded by rememberSaveable { mutableStateOf(false) }
+    var displayExpanded by rememberSaveable { mutableStateOf(false) }
+    var dataExpanded by rememberSaveable { mutableStateOf(false) }
+    var systemExpanded by rememberSaveable { mutableStateOf(false) }
     ImmersivePage(
         title = stringResource(R.string.settings_title), onBack = back,
         actions = {
@@ -202,34 +207,70 @@ private fun SettingsRoot(navController: NavController, open: (SettingsPage) -> U
             }
         }
         // What is changed most, first: playback, the order of the sources, the transitions.
-        immersiveGroup("root") {
-            row { ImmersiveGroupRow("Immersive Experience 2.0", detail = "Dynamic Backgrounds, Widescreen TV & Video Audio Handoff", icon = Icons.Rounded.AutoAwesome, chevron = true, onClick = { navController.navigate(Routes.ImmersiveExperienceSettings.route) }) }
-            row { ImmersiveGroupRow(stringResource(R.string.settings_section_playback), icon = Icons.Rounded.PlayArrow, chevron = true, onClick = { open(SettingsPage.Playback) }) }
-            row {
-                ImmersiveGroupRow(stringResource(R.string.settings_sources_tab), icon = Icons.Rounded.Extension, chevron = true,
-                    detail = audioLine ?: stringResource(R.string.settings_sources_detail), onClick = { open(SettingsPage.Sources) })
-            }
+        immersiveGroup("section-playback") {
             row {
                 ImmersiveGroupRow(
-                    stringResource(R.string.settings_transitions_title), icon = Icons.Rounded.GraphicEq, chevron = true,
-                    value = transitionValue(crossfade), onClick = { open(SettingsPage.Crossfade) },
+                    "Playback & Audio", icon = Icons.Rounded.PlayArrow, chevron = true,
+                    onClick = { playbackExpanded = !playbackExpanded },
+                    detail = if (playbackExpanded) "Expanded" else "Collapsed",
                 )
             }
-            row { ImmersiveGroupRow(stringResource(R.string.settings_section_downloads), icon = Icons.Rounded.Download, chevron = true, onClick = { open(SettingsPage.Downloads) }) }
-            row { ImmersiveGroupRow(stringResource(R.string.settings_section_lyrics), icon = Icons.Rounded.Lyrics, chevron = true, onClick = { open(SettingsPage.Lyrics) }) }
+            if (playbackExpanded) {
+                row { ImmersiveGroupRow("Immersive Experience 2.0", detail = "Dynamic Backgrounds & Widescreen TV", icon = Icons.Rounded.AutoAwesome, chevron = true, onClick = { navController.navigate(Routes.ImmersiveExperienceSettings.route) }) }
+                row { ImmersiveGroupRow(stringResource(R.string.settings_section_playback), chevron = true, onClick = { open(SettingsPage.Playback) }) }
+                row { ImmersiveGroupRow(stringResource(R.string.settings_sources_tab), chevron = true, detail = audioLine ?: stringResource(R.string.settings_sources_detail), onClick = { open(SettingsPage.Sources) }) }
+                row { ImmersiveGroupRow(stringResource(R.string.settings_transitions_title), chevron = true, value = transitionValue(crossfade), onClick = { open(SettingsPage.Crossfade) }) }
+                row { ImmersiveGroupRow(stringResource(R.string.settings_section_lyrics), chevron = true, onClick = { open(SettingsPage.Lyrics) }) }
+            }
         }
-        immersiveGroup("more") {
-            row { ImmersiveGroupRow(stringResource(R.string.settings_section_display), icon = Icons.Rounded.Palette, chevron = true, onClick = { open(SettingsPage.Display) }) }
-            row { ImmersiveGroupRow(stringResource(R.string.settings_section_data), icon = Icons.Rounded.SignalCellularAlt, chevron = true, onClick = { open(SettingsPage.Data) }) }
-            row { ImmersiveGroupRow(stringResource(R.string.settings_section_storage), icon = Icons.Rounded.Storage, chevron = true, onClick = { open(SettingsPage.Storage) }) }
-            row { ImmersiveGroupRow(stringResource(R.string.settings_section_app), icon = Icons.Rounded.Info, chevron = true, onClick = { open(SettingsPage.App) }) }
-        }
-        immersiveGroup("accounts") {
+        immersiveGroup("section-downloads") {
             row {
                 ImmersiveGroupRow(
-                    stringResource(R.string.accounts_title), detail = com.music.spotui.ui.components.switchAccountDetail(),
-                    icon = Icons.Rounded.Person, chevron = true, onClick = { open(SettingsPage.Accounts) },
+                    "Downloads & Storage", icon = Icons.Rounded.Download, chevron = true,
+                    onClick = { downloadsExpanded = !downloadsExpanded },
+                    detail = if (downloadsExpanded) "Expanded" else "Collapsed",
                 )
+            }
+            if (downloadsExpanded) {
+                row { ImmersiveGroupRow(stringResource(R.string.settings_section_downloads), chevron = true, onClick = { open(SettingsPage.Downloads) }) }
+                row { ImmersiveGroupRow(stringResource(R.string.settings_section_storage), chevron = true, onClick = { open(SettingsPage.Storage) }) }
+            }
+        }
+        immersiveGroup("section-display") {
+            row {
+                ImmersiveGroupRow(
+                    "Display & Look", icon = Icons.Rounded.Palette, chevron = true,
+                    onClick = { displayExpanded = !displayExpanded },
+                    detail = if (displayExpanded) "Expanded" else "Collapsed",
+                )
+            }
+            if (displayExpanded) {
+                row { ImmersiveGroupRow(stringResource(R.string.settings_section_display), chevron = true, onClick = { open(SettingsPage.Display) }) }
+            }
+        }
+        immersiveGroup("section-data") {
+            row {
+                ImmersiveGroupRow(
+                    "Data & Network", icon = Icons.Rounded.SignalCellularAlt, chevron = true,
+                    onClick = { dataExpanded = !dataExpanded },
+                    detail = if (dataExpanded) "Expanded" else "Collapsed",
+                )
+            }
+            if (dataExpanded) {
+                row { ImmersiveGroupRow(stringResource(R.string.settings_section_data), chevron = true, onClick = { open(SettingsPage.Data) }) }
+            }
+        }
+        immersiveGroup("section-system") {
+            row {
+                ImmersiveGroupRow(
+                    "System & Accounts", icon = Icons.Rounded.Person, chevron = true,
+                    onClick = { systemExpanded = !systemExpanded },
+                    detail = if (systemExpanded) "Expanded" else "Collapsed",
+                )
+            }
+            if (systemExpanded) {
+                row { ImmersiveGroupRow(stringResource(R.string.settings_section_app), chevron = true, onClick = { open(SettingsPage.App) }) }
+                row { ImmersiveGroupRow(stringResource(R.string.accounts_title), detail = com.music.spotui.ui.components.switchAccountDetail(), chevron = true, onClick = { open(SettingsPage.Accounts) }) }
             }
         }
     }
@@ -334,13 +375,7 @@ private fun PlaybackPage(navController: NavController, open: (SettingsPage) -> U
     ImmersivePage(title = stringResource(R.string.settings_section_playback), onBack = back) {
         if (ext != null && extHeader != null) extensionSectionGroup(ext, extHeader)
 
-        immersiveGroup("accounts", headerRes = R.string.settings_section_playback) {
-            row {
-                ImmersiveGroupRow(
-                    "Spotify Accounts", detail = "Manage multiple Spotify accounts & persistent sessions",
-                    chevron = true, onClick = { navController.navigate(Routes.Accounts.route) },
-                )
-            }
+        immersiveGroup("carmode", headerRes = R.string.settings_section_playback) {
             row {
                 ImmersiveGroupRow(
                     "Car Mode", detail = "Bluetooth auto-activation, voice commands & driving UI",
@@ -499,16 +534,8 @@ private fun LyricsPage(open: (SettingsPage) -> Unit, back: () -> Unit) {
                     detail = stringResource(R.string.lyrics_extra_summary),
                 )
             }
-                )
-            }
             row {
                 ImmersiveSwitchRow(
-<<<<<<< HEAD
-                    stringResource(R.string.settings_download_sync_title),
-                    checked = com.music.spotui.data.preferences.DownloadSyncPref.on,
-                    onChecked = { com.music.spotui.data.preferences.DownloadSyncPref.set(ctx, it) },
-                    detail = stringResource(R.string.settings_download_sync_detail),
-=======
                     stringResource(R.string.settings_lyrics_keep_awake_title),
                     checked = com.music.spotui.data.preferences.LyricsKeepAwakePref.on,
                     onChecked = { com.music.spotui.data.preferences.LyricsKeepAwakePref.set(ctx, it) },
@@ -531,11 +558,9 @@ private fun LyricsPage(open: (SettingsPage) -> Unit, back: () -> Unit) {
                     value = if (translateTo.isEmpty()) stringResource(R.string.language_auto)
                     else com.music.spotui.data.AppLanguage.nativeName(translateTo),
                     chevron = true, onClick = { open(SettingsPage.LyricsLanguage) },
->>>>>>> upstream/main
                 )
             }
         }
-        sourcesGroup(app.myspoti.extensions.Action.AUDIO_SOURCE, navController)
     }
 }
 
@@ -1059,66 +1084,6 @@ private fun DisplayPage(open: (SettingsPage) -> Unit, back: () -> Unit) {
                     stringResource(R.string.settings_item_app_language_title),
                     value = if (language == com.music.spotui.data.AppLanguage.SYSTEM) auto else com.music.spotui.data.AppLanguage.nativeName(language),
                     chevron = true, onClick = { open(SettingsPage.Language) },
-                )
-            }
-        }
-        immersiveGroup("tv_desktop") {
-            row {
-                ImmersiveGroupRow(
-                    "Default TV layout",
-                    value = when (com.music.spotui.data.preferences.TvModePref.layoutPreset) {
-                        com.music.spotui.data.preferences.TvModePref.LAYOUT_CINEMA -> "Cinema"
-                        com.music.spotui.data.preferences.TvModePref.LAYOUT_LYRICS -> "Lyrics"
-                        com.music.spotui.data.preferences.TvModePref.LAYOUT_MINIMAL -> "Minimal"
-                        else -> "Balanced"
-                    },
-                    onClick = {
-                        val next = when (com.music.spotui.data.preferences.TvModePref.layoutPreset) {
-                            com.music.spotui.data.preferences.TvModePref.LAYOUT_BALANCED -> com.music.spotui.data.preferences.TvModePref.LAYOUT_CINEMA
-                            com.music.spotui.data.preferences.TvModePref.LAYOUT_CINEMA -> com.music.spotui.data.preferences.TvModePref.LAYOUT_LYRICS
-                            com.music.spotui.data.preferences.TvModePref.LAYOUT_LYRICS -> com.music.spotui.data.preferences.TvModePref.LAYOUT_MINIMAL
-                            else -> com.music.spotui.data.preferences.TvModePref.LAYOUT_BALANCED
-                        }
-                        com.music.spotui.data.preferences.TvModePref.setLayout(ctx, next)
-                    },
-                )
-            }
-            row {
-                ImmersiveGroupRow(
-                    "Auto-hide controls",
-                    value = if (com.music.spotui.data.preferences.TvModePref.autoHideSeconds == 0) "Never" else "${com.music.spotui.data.preferences.TvModePref.autoHideSeconds}s",
-                    onClick = {
-                        val next = when (com.music.spotui.data.preferences.TvModePref.autoHideSeconds) {
-                            0 -> 2
-                            2 -> 5
-                            5 -> 8
-                            else -> 0
-                        }
-                        com.music.spotui.data.preferences.TvModePref.setAutoHide(ctx, next)
-                    },
-                )
-            }
-            row {
-                ImmersiveGroupRow(
-                    "Ambient screensaver",
-                    value = if (com.music.spotui.data.preferences.TvModePref.ambientSeconds == 0) "Never" else "${com.music.spotui.data.preferences.TvModePref.ambientSeconds}s",
-                    onClick = {
-                        val next = when (com.music.spotui.data.preferences.TvModePref.ambientSeconds) {
-                            0 -> 15
-                            15 -> 30
-                            30 -> 60
-                            else -> 0
-                        }
-                        com.music.spotui.data.preferences.TvModePref.setAmbient(ctx, next)
-                    },
-                )
-            }
-            row {
-                ImmersiveSwitchRow(
-                    "Up Next preview card",
-                    checked = com.music.spotui.data.preferences.TvModePref.upNextEnabled,
-                    onChecked = { com.music.spotui.data.preferences.TvModePref.setUpNext(ctx, it) },
-                    detail = "Announce upcoming song 12s before track ends",
                 )
             }
         }

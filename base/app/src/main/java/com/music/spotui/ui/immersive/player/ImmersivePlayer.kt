@@ -21,8 +21,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.spotui.ui.navigation.PlayerSheet
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,6 +35,10 @@ import androidx.compose.foundation.gestures.awaitTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.verticalDrag
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,8 +70,20 @@ import androidx.compose.material.icons.rounded.Tune
 import com.music.spotui.data.preferences.ImmersiveSettingsPref
 import com.music.spotui.ui.navigation.Routes
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.OndemandVideo
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.CircularProgressIndicator
@@ -78,6 +96,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -88,6 +107,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.positionChange
@@ -262,18 +282,20 @@ fun ImmersivePlayer(
     navController: NavController? = null,
 ) {
     val view = androidx.compose.ui.platform.LocalView.current
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        view.keepScreenOn = true
+    val keepAwake = com.music.spotui.data.preferences.LyricsKeepAwakePref.on
+    androidx.compose.runtime.DisposableEffect(keepAwake) {
+        view.keepScreenOn = keepAwake
         onDispose { view.keepScreenOn = false }
     }
 
     val context = LocalContext.current
     val palette = rememberArtworkColors(state.coverUrl.takeIf { it.isNotBlank() })
-    val animatedArtwork by ImmersiveSettingsPref.animatedArtworkEnabled.collectAsStateWithLifecycle()
+    val visualAndArt by ImmersiveSettingsPref.animatedArtworkAndVisualizerEnabled.collectAsStateWithLifecycle()
     val gestureControls by ImmersiveSettingsPref.gestureControlsEnabled.collectAsStateWithLifecycle()
-    val visualizerOn by ImmersiveSettingsPref.visualizerEnabled.collectAsStateWithLifecycle()
-    val visualizerIntensity by ImmersiveSettingsPref.visualizerIntensity.collectAsStateWithLifecycle()
-    val reduceMotion = com.music.spotui.ui.look.rememberReduceMotion()
+    val visualizerOn = visualAndArt
+    val visualizerIntensity = "high"
+    val reduceMotion = false
+    val animatedArtwork = visualAndArt
 
     // A crossfade: the colours of the song going out, as they were when it began (the new cover's
     // own come once it is loaded, and rememberArtworkColors keeps the old ones until then).
@@ -339,9 +361,9 @@ fun ImmersivePlayer(
     // around the panel; closing the panel opens the cover into the clip again.
     val canvasUrl = rememberImmersiveCanvas(state)
     var canvasShown by remember(canvasUrl) {
-        mutableStateOf(canvasUrl != null && com.music.spotui.ui.components.CanvasPlayer.isReady(canvasUrl))
+        mutableStateOf(canvasUrl != null)
     }
-    val canvasOn = canvasUrl != null && canvasShown && !state.adPlaying && panel == Panel.NONE && !videoOn
+    val canvasOn = canvasUrl != null && !state.adPlaying && !videoOn
     // Opening on a clip already showing starts at the end; every later change animates from where it is.
     val canvasOpen = remember { androidx.compose.animation.core.Animatable(if (canvasOn) 1f else 0f) }
     // Opening the player: the heart of the song shown is checked again if its state is old.
@@ -370,7 +392,7 @@ fun ImmersivePlayer(
         val window = com.music.spotui.ui.components.windowSize()
         val landscape = maxWidth > maxHeight || window.twoPane
         val sidePane = window.large && maxWidth >= SIDE_PANE_MIN_WIDTH
-        val isTv = remember { com.music.spotui.tv.TvDetect.isTv(context) }
+        val isTv = remember { com.music.spotui.ui.tv.Tv.isTv(context) }
         val isWidescreenTv = isTv || landscape
 
         val displayState = when {
@@ -411,19 +433,7 @@ fun ImmersivePlayer(
         // An AutoMix mix: the content draws in with it and springs back after it, the backdrop stays.
         Box(Modifier.fillMaxSize().mixSqueeze(mixMotion)) {
         CompositionLocalProvider(LocalPlayerTint provides tint) {
-            if (isWidescreenTv) {
-                WidescreenTvPlayer(
-                    state = state,
-                    actions = actions,
-                    tint = tint,
-                    canvasUrl = canvasUrl,
-                    pauseScale = pauseScale,
-                    volume = volume,
-                    onOpenDevices = { showDevices = true },
-                    onMore = if (navController != null && state.song != null) ({ showMenu = true }) else null,
-                    onSource = { showQuality = true },
-                )
-            } else if (landscape) LandscapePlayer(
+            if (landscape) LandscapePlayer(
                 state = state,
                 actions = actions,
                 tint = tint,
@@ -443,6 +453,8 @@ fun ImmersivePlayer(
                 onSource = { showQuality = true },
                 onSourceLong = { showNerd = true },
                 sidePane = sidePane,
+                canvasUrl = canvasUrl,
+                canvasOn = canvasOn,
             ) else Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
                 // The handle: always hands its drags to the sheet.
                 Box(
@@ -497,7 +509,7 @@ fun ImmersivePlayer(
                     }
 
                     // ---- Immersive Visualizer behind Artwork ----
-                    if (panel == Panel.NONE && !videoOn) {
+                    if (panel == Panel.NONE && !canvasOn) {
                         ImmersiveVisualizer(
                             enabled = visualizerOn,
                             playing = state.playing,
@@ -832,13 +844,6 @@ private fun RowScope.PlayerCredits(
 
     if (onMore != null) {
         Spacer(Modifier.width(8.dp))
-        LongPressVideoButton(
-            videoOn = videoOn,
-            videoAudioActive = mv.isVideoAudioActive,
-            onShortClick = { mv.handleShortClick() },
-            onLongPressComplete = { mv.handleLongPress(context) },
-        )
-        Spacer(Modifier.width(8.dp))
         CircleGlyph(
             icon = Icons.Rounded.MoreHoriz,
             contentDescription = stringResource(R.string.immersive_player_more),
@@ -900,6 +905,65 @@ private fun PlayerControlsBlock(
  * are up), on the right the credits, the scrubber, every transport control and the bottom row.
  * The right side scrolls if a small window cannot hold it, so no control is out of reach.
  */
+@Composable
+private fun LandscapeTransportRow(
+    state: ImmersivePlayerState,
+    actions: ImmersivePlayerActions,
+    volume: PlayerVolume,
+    onOpenDevices: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = actions.toggleLike, modifier = Modifier.size(36.dp)) {
+            Icon(
+                if (state.liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                contentDescription = "Like",
+                tint = if (state.liked) Color(0xFF1DB954) else Color.White,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        IconButton(onClick = actions.toggleShuffle, modifier = Modifier.size(36.dp)) {
+            Icon(
+                Icons.Rounded.Shuffle,
+                contentDescription = "Shuffle",
+                tint = if (state.shuffle || state.smart) Color(0xFF1DB954) else Color.White.copy(alpha = 0.6f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        IconButton(onClick = actions.previous, modifier = Modifier.size(40.dp)) {
+            Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(28.dp))
+        }
+        IconButton(
+            onClick = actions.playPause,
+            modifier = Modifier.size(44.dp).background(Color.White, CircleShape),
+        ) {
+            Icon(
+                if (state.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = if (state.playing) "Pause" else "Play",
+                tint = Color.Black,
+                modifier = Modifier.size(28.dp),
+            )
+        }
+        IconButton(onClick = actions.next, modifier = Modifier.size(40.dp)) {
+            Icon(Icons.Rounded.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(28.dp))
+        }
+        IconButton(onClick = actions.cycleRepeat, modifier = Modifier.size(36.dp)) {
+            val (icon, tint) = when (state.repeatMode) {
+                1 -> Icons.Rounded.RepeatOne to Color(0xFF1DB954)
+                2 -> Icons.Rounded.Repeat to Color(0xFF1DB954)
+                else -> Icons.Rounded.Repeat to Color.White.copy(alpha = 0.6f)
+            }
+            Icon(icon, contentDescription = "Repeat", tint = tint, modifier = Modifier.size(20.dp))
+        }
+        IconButton(onClick = onOpenDevices, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.AutoMirrored.Rounded.VolumeUp, contentDescription = "Devices", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(22.dp))
+        }
+    }
+}
+
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
 private fun LandscapePlayer(
@@ -922,119 +986,158 @@ private fun LandscapePlayer(
     onSource: () -> Unit,
     onSourceLong: () -> Unit = {},
     sidePane: Boolean = false,
+    canvasUrl: String? = null,
+    canvasOn: Boolean = false,
 ) {
-    val videoState by remember { com.music.spotui.video.MusicVideoController.state }
-    val videoOn by remember { com.music.spotui.video.MusicVideoController.on }
-    val videoFullscreen by remember { com.music.spotui.video.MusicVideoController.fullscreen }
-    val videoReady = videoState is com.music.spotui.video.MusicVideoController.State.Ready
-
-    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-        // The handle: always hands its drags to the sheet.
-        Box(
-            Modifier.fillMaxWidth().height(DISMISS_STRIP_HEIGHT).dragToClose()
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { actions.close() },
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(Modifier.width(36.dp).height(5.dp).clip(CircleShape).background(tint.copy(alpha = 0.35f)))
+    var chromeVisible by remember { mutableStateOf(true) }
+    var lastNavMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(chromeVisible, lastNavMs, state.playing) {
+        if (!chromeVisible || !state.playing) return@LaunchedEffect
+        while (isActive) {
+            delay(500)
+            if (System.currentTimeMillis() - lastNavMs > 6_000L) { chromeVisible = false; break }
         }
+    }
+    val idle by animateFloatAsState(
+        if (chromeVisible) 0f else 1f,
+        if (chromeVisible) tween(240, easing = FastOutSlowInEasing) else tween(1600, easing = FastOutSlowInEasing),
+        label = "idle",
+    )
+    val chromeAlpha = 1f - idle
+
+    val coverShiftDp by animateDpAsState(
+        targetValue = if (chromeVisible) 0.dp else 44.dp,
+        animationSpec = tween(350, easing = FastOutSlowInEasing),
+        label = "coverShift",
+    )
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    lastNavMs = System.currentTimeMillis()
+                    chromeVisible = !chromeVisible
+                })
+            },
+    ) {
+        // Base Mesh Background
+        com.music.spotui.ui.look.MeshGradientBackground(palette, Modifier.fillMaxSize(), trackKey = state.title)
+
+        if (canvasOn && canvasUrl != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.55f),
+            ) {
+                com.music.spotui.ui.screens.CanvasVideo(
+                    url = canvasUrl,
+                    playing = state.playing,
+                    onFirstFrame = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            0f to Color.Transparent,
+                            0.35f to Color(0x22000000),
+                            0.55f to Color(0x99000000),
+                            0.80f to Color(0xEE000000),
+                            1f to Color(0xFD000000),
+                        )
+                    )
+            )
+        } else {
+            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color(0x33000000), 0.45f to Color(0x55000000), 1f to Color(0xAA000000))))
+        }
+
         Row(
-            Modifier.weight(1f).fillMaxWidth().padding(start = PLAYER_GUTTER, end = PLAYER_GUTTER, bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(PLAYER_GUTTER),
+            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 28.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(36.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                val side = minOf(maxWidth, maxHeight)
-                // With a side pane the cover stays: the panels open in the third column.
-                Crossfade(targetState = if (sidePane) Panel.NONE else panel, animationSpec = tween(250), modifier = Modifier.fillMaxSize(), label = "playerLandscapePanel") { shown ->
-                    when (shown) {
-                        Panel.LYRICS -> ImmersiveLyricsPanel(Modifier.fillMaxSize(), PaddingValues(vertical = 4.dp))
-                        Panel.QUEUE -> ImmersiveQueuePanel(Modifier.fillMaxSize(), PaddingValues(vertical = 4.dp))
-                        else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            if (visualizerOn && !videoOn) {
-                                ImmersiveVisualizer(
-                                    enabled = visualizerOn,
-                                    playing = state.playing,
-                                    intensity = visualizerIntensity,
-                                    palette = palette,
-                                    reducedMotion = reduceMotion,
-                                    canvasActive = false,
-                                    modifier = Modifier.size(side),
-                                )
-                            }
-                            Box(
-                                Modifier
-                                    .size(side)
-                                    .graphicsLayer {
-                                        // The pause step back, as in the portrait layout, and the mix's beat.
-                                        val beat = 1f + MIX_BEAT_GROW * (state.mixPulse?.level() ?: 0f)
-                                        scaleX = pauseScale.value * beat
-                                        scaleY = pauseScale.value * beat
-                                        shadowElevation = 10.dp.toPx()
-                                        shape = ArtCorner
-                                        clip = true
-                                    }
-                                    .background(Color.Black.copy(alpha = 0.18f))
-                                    .dragToClose()
-                                    .swipeToChangeTrack(enabled = true, actions = actions),
-                            ) {
-                                if (videoOn) {
-                                    Box(Modifier.fillMaxSize()) {
-                                        com.music.spotui.ui.components.VideoSurface(
-                                            modifier = Modifier.fillMaxSize(),
-                                            active = !videoFullscreen,
-                                            onTap = { },
-                                        )
-                                        com.music.spotui.ui.components.VideoFullscreenButton(
-                                            Modifier.align(Alignment.BottomEnd).padding(4.dp),
-                                        )
-                                    }
-                                } else {
-                                    AnimatedArtworkContainer(
-                                        state = state,
-                                        blend = state.blend,
-                                        isPlaying = state.playing,
-                                        animatedArtworkEnabled = animatedArtwork,
-                                        reducedMotion = reduceMotion,
-                                        canvasActive = false,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                }
-
-                                ArtworkGestureOverlay(
-                                    enabled = gestureControls && !videoOn,
-                                    onSwipeNext = { actions.next() },
-                                    onSwipePrevious = { actions.previous() },
-                                    onDoubleTap = { actions.toggleLike() },
-                                    onLongPress = { onMore?.invoke() },
-                                    onSingleTap = { },
-                                    modifier = Modifier.fillMaxSize(),
-                                )
-                            }
+            Column(
+                Modifier
+                    .width(360.dp)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (canvasOn) {
+                    // Picture 1: Canvas active - top action buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth().graphicsLayer { alpha = chromeAlpha },
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = onToggleQueue, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Queue", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(20.dp))
+                        }
+                        IconButton(onClick = onOpenDevices, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Devices, contentDescription = "Devices", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(20.dp))
                         }
                     }
-                }
-            }
-            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                // The volume bar is the first thing to go when the window is low: the hardware keys do it too.
-                val showVolume = com.music.spotui.data.preferences.PlayerVolumePref.on && maxHeight >= LANDSCAPE_VOLUME_MIN_HEIGHT
-                Column(Modifier.widthIn(max = PLAYER_MAX_WIDTH).verticalScroll(rememberScrollState())) {
-                    Row(Modifier.fillMaxWidth().height(HEADER_HEIGHT), verticalAlignment = Alignment.CenterVertically) {
-                        PlayerCredits(state, actions, tint, scrolls = true, collapse = { 0f }, onMore = onMore, onSource = onSource, onSourceLong = onSourceLong)
+                    Spacer(Modifier.weight(1f))
+                    // Bottom-left info & scrubber
+                    Text(state.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
+                    Text(state.artist, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(6.dp))
+                    PlayerScrubber(state = state, onSeek = actions.seekTo)
+                    Spacer(Modifier.height(6.dp))
+                    Box(modifier = Modifier.graphicsLayer { alpha = chromeAlpha }) {
+                        LandscapeTransportRow(
+                            state = state,
+                            actions = actions,
+                            volume = volume,
+                            onOpenDevices = onOpenDevices,
+                        )
+                    }
+                } else {
+                    // Picture 3: Canvas NOT active - Large Cover, Scrubber immediately below, Title & Artist centered, Transport controls below!
+                    Crossfade(state.coverUrl, animationSpec = tween(800), label = "cover") { url ->
+                        com.music.spotui.ui.tv.TvCover(url, Modifier.size(210.dp), RoundedCornerShape(16.dp))
                     }
                     Spacer(Modifier.height(8.dp))
-                    PlayerControlsBlock(
-                        state = state, actions = actions, volume = volume,
-                        lyricsOpen = panel == Panel.LYRICS, queueOpen = panel == Panel.QUEUE, showVolume = showVolume,
-                        onToggleLyrics = onToggleLyrics, onToggleQueue = onToggleQueue, onOpenDevices = onOpenDevices,
+                    PlayerScrubber(state = state, onSeek = actions.seekTo)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        state.title,
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
                     )
+                    Text(
+                        state.artist,
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Box(modifier = Modifier.graphicsLayer { alpha = chromeAlpha }) {
+                        LandscapeTransportRow(
+                            state = state,
+                            actions = actions,
+                            volume = volume,
+                            onOpenDevices = onOpenDevices,
+                        )
+                    }
                 }
             }
-            if (sidePane && panel != Panel.NONE) Box(Modifier.weight(1.1f).fillMaxHeight()) {
-                Crossfade(targetState = panel, animationSpec = tween(250), modifier = Modifier.fillMaxSize(), label = "playerSidePane") { shown ->
+
+            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                Crossfade(targetState = panel, animationSpec = tween(250), modifier = Modifier.fillMaxSize(), label = "playerLandscapePanel") { shown ->
                     when (shown) {
-                        Panel.LYRICS -> ImmersiveLyricsPanel(Modifier.fillMaxSize(), PaddingValues(vertical = 4.dp))
                         Panel.QUEUE -> ImmersiveQueuePanel(Modifier.fillMaxSize(), PaddingValues(vertical = 4.dp))
-                        else -> Box(Modifier.fillMaxSize())
+                        else -> ImmersiveLyricsPanel(Modifier.fillMaxSize(), PaddingValues(vertical = 4.dp))
                     }
                 }
             }

@@ -119,10 +119,6 @@ fun MyNavHost(
         }
 
         page(Routes.ImmersiveExperienceSettings.route) {
-            LaunchedEffect(playerState) {
-                bottomBarState.value = false
-                bottomBarPlayerState.value = false
-            }
             com.music.spotui.ui.screens.ImmersiveExperienceSettingsScreen(onBack = { navHostController.popBackStack() })
         }
 
@@ -166,34 +162,22 @@ fun MyNavHost(
         }
 
         page(Routes.Accounts.route) {
-            LaunchedEffect(playerState) {
-                bottomBarState.value = false
-                bottomBarPlayerState.value = false
-            }
             com.music.spotui.ui.screens.AccountsScreen(navHostController, onBack = { navHostController.popBackStack() })
         }
 
         page(Routes.CarMode.route) {
-            LaunchedEffect(playerState) {
-                bottomBarState.value = false
-                bottomBarPlayerState.value = false
-            }
             com.music.spotui.car.CarModeScreen(navHostController)
         }
 
         page(Routes.CarModeSettings.route) {
-            LaunchedEffect(playerState) {
-                bottomBarState.value = false
-                bottomBarPlayerState.value = false
-            }
             com.music.spotui.ui.screens.CarModeSettingsScreen(navHostController)
         }
 
+        page(Routes.TvMode.route) {
+            com.music.spotui.ui.tv.TvApp()
+        }
+
         page(Routes.FullscreenPlayer.route) {
-            LaunchedEffect(playerState) {
-                bottomBarState.value = false
-                bottomBarPlayerState.value = false
-            }
             com.music.spotui.ui.screens.FullscreenNowPlayingScreen(navHostController)
         }
 

@@ -330,7 +330,7 @@ fun PlayerScreen(navController: NavController) {
     LaunchedEffect(com.music.spotui.data.DataSaver.active) {
         if (com.music.spotui.data.DataSaver.active && mv.on.value) mv.setOn(false)
     }
-    val videoOn = mv.on.value && videoMatchesTrack && !remote && com.music.spotui.data.preferences.MusicVideoPref.on
+    val videoOn = mv.on.value && !remote && com.music.spotui.data.preferences.MusicVideoPref.on
     // Canvas / clip players are built once the sheet has finished rising (then kept):
     // creating them in the first frame stalled it and the slide jumped.
     val settled by com.music.spotui.ui.navigation.LocalPageSettled.current
@@ -503,12 +503,19 @@ fun PlayerScreen(navController: NavController) {
             }) {
             if (showVideo) Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().background(Color.Black),
             ) {
-                // The full-screen button in the clip's corner: under it, it overlapped the pills.
-                Box {
-                    com.music.spotui.ui.components.VideoSurface(onTap = { mv.fullscreen.value = true })
-                    if (!immersive) com.music.spotui.ui.components.VideoFullscreenButton(Modifier.align(Alignment.BottomEnd))
+                if (readyVideo != null) {
+                    // The full-screen button in the clip's corner: under it, it overlapped the pills.
+                    Box {
+                        com.music.spotui.ui.components.VideoSurface(onTap = { mv.fullscreen.value = true })
+                        if (!immersive) com.music.spotui.ui.components.VideoFullscreenButton(Modifier.align(Alignment.BottomEnd))
+                    }
+                } else {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        color = Color.White,
+                        modifier = Modifier.size(48.dp),
+                    )
                 }
             } else androidx.compose.runtime.key("artwork") {
             // Back on screen after the clip (or its full screen, laid out landscape): the pager
@@ -1612,7 +1619,7 @@ fun AddButton(song: () -> SongsModel, liked: Boolean, size: androidx.compose.ui.
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-internal fun CanvasVideo(url: String, playing: Boolean, onFirstFrame: () -> Unit, modifier: Modifier = Modifier) {
+fun CanvasVideo(url: String, playing: Boolean, onFirstFrame: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val exo = remember(url) { com.music.spotui.ui.components.CanvasPlayer.get(context, url) }
     val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle

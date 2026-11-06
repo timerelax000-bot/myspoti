@@ -129,7 +129,7 @@ internal fun TvNowPlaying(onArtist: (id: String, name: String) -> Unit) {
 
 /** The player drawn from plain state; [panel] draws the lyrics, or the queue when its flag is set. */
 @Composable
-internal fun TvPlayerScreen(
+fun TvPlayerScreen(
     state: ImmersivePlayerState,
     actions: ImmersivePlayerActions,
     palette: com.music.spotui.ui.look.MeshPalette,

@@ -142,8 +142,6 @@ fun ImmersiveMiniPlayer(modifier: Modifier = Modifier) {
                     modifier = Modifier.titleMarquee(iterations = 1),
                 )
             }
-                )
-            }
         }
         // The spinner and the button hand over in a short fade, not in one frame.
         com.music.spotui.ui.components.LoadedFade(buffering) { loading ->

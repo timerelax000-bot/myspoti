@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DirectionsCar
+import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lightbulb
@@ -55,7 +56,6 @@ import com.music.spotui.di.Haptics
 import com.music.spotui.di.SongPlayer
 import com.music.spotui.ui.components.AddToPlaylistSheet
 import com.music.spotui.ui.components.CreditsSheet
-import com.music.spotui.ui.components.DownloadBadge
 import com.music.spotui.ui.components.SavedInSheet
 import com.music.spotui.ui.components.ShareTarget
 import com.music.spotui.ui.immersive.sheets.ImmersiveSleepTimerSheet as SleepTimerSheet
@@ -119,11 +119,9 @@ fun ImmersiveSongOptionsSheet(
     if (showSleep) { SleepTimerSheet(onDismiss = { showSleep = false; onDismiss() }); return }
 
     val hasId = song.spotifyTrackId.isNotBlank()
-    // A Live Radio station playing right now: no queue, album or artist page of its own, but
-    // (unlike a track with no Spotify id) a name and homepage worth sharing.
     val isRadio = nowPlaying && com.music.spotui.radio.RadioPlayer.current() != null
     val episodeKey = com.music.spotui.data.offline.episodeKeyOf(song)
-    val downloadKey = episodeKey ?: song.spotifyTrackId
+
     fun toast(text: String) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
 
     ImmersiveSheet(onDismiss = onDismiss, imageUrl = song.coverUri) {
@@ -148,7 +146,7 @@ fun ImmersiveSongOptionsSheet(
 
         if (videoOn) {
             ImmersiveSheetRow(
-                icon = if (clipSound) androidx.compose.material.icons.Icons.Default.VolumeUp else androidx.compose.material.icons.Icons.Default.MusicNote,
+                icon = if (clipSound) Icons.Default.VolumeUp else Icons.Default.MusicNote,
                 label = stringResource(if (clipSound) R.string.clip_sound_clip else R.string.clip_sound_song),
             ) {
                 com.music.spotui.video.MusicVideoController.setClipSound(!clipSound)
@@ -158,94 +156,30 @@ fun ImmersiveSongOptionsSheet(
             }
         }
 
-        ImmersiveSheetRow(Icons.AutoMirrored.Rounded.PlaylistAdd, stringResource(R.string.context_menu_add_to_playlist), enabled = hasId) { showSavedIn = true }
+        if (onRemoveFromPlaylist != null) {
+            ImmersiveSheetRow(Icons.Rounded.DeleteOutline, stringResource(R.string.context_menu_remove_from_playlist)) {
+                onRemoveFromPlaylist()
+                onDismiss()
+            }
+        }
 
         if (!nowPlaying) {
-            ImmersiveSheetRow(Icons.AutoMirrored.Rounded.PlaylistAdd, stringResource(R.string.context_menu_add_to_another_playlist), enabled = hasId) { showAddTo = true }
+            ImmersiveSheetRow(Icons.AutoMirrored.Rounded.PlaylistAdd, stringResource(R.string.context_menu_add_to_playlist), enabled = hasId) { showSavedIn = true }
         }
-        if (onRemoveFromPlaylist != null) {
-            ImmersiveSheetRow(Icons.Rounded.DeleteOutline, stringResource(R.string.context_menu_remove_from_playlist), enabled = hasId) {
-                onDismiss()
-                onRemoveFromPlaylist()
-            }
-        }
-        if (!nowPlaying) {
-            ImmersiveSheetRow(Icons.AutoMirrored.Rounded.PlaylistPlay, stringResource(R.string.context_menu_play_next), enabled = hasId) {
-                playerViewModel.playNext(song)
-                Haptics.confirm()
-                toast(context.getString(R.string.context_menu_play_next))
-                onDismiss()
-            }
-            ImmersiveSheetRow(Icons.AutoMirrored.Rounded.QueueMusic, stringResource(R.string.context_menu_add_to_queue), enabled = hasId) {
-                playerViewModel.addToQueue(song)
-                Haptics.confirm()
+
+        if (nowPlaying) {
+            ImmersiveSheetRow(Icons.AutoMirrored.Rounded.PlaylistAdd, stringResource(R.string.context_menu_add_to_playlist), enabled = hasId) { showSavedIn = true }
+
+        } else {
+            ImmersiveSheetRow(Icons.AutoMirrored.Rounded.PlaylistPlay, stringResource(R.string.context_menu_add_to_queue), enabled = hasId) {
+                SongPlayer.addToQueue(song.spotifyTrackId)
                 toast(context.getString(R.string.snackbar_added_to_queue))
                 onDismiss()
             }
-        } else if (onOpenQueue != null) {
-            ImmersiveSheetRow(Icons.AutoMirrored.Rounded.QueueMusic, stringResource(R.string.context_menu_go_to_queue), enabled = !isRadio) {
-                onDismiss()
-                onOpenQueue()
-            }
-        }
         }
 
-        val offline = com.music.spotui.data.offline.OfflineStore.statusOf(downloadKey)
-        when {
-            offline == com.music.spotui.data.offline.OfflineStatus.Done -> ImmersiveSheetRow(
-                null, stringResource(R.string.context_menu_undownload),
-                leading = { DownloadBadge(offline, size = 22.dp) },
-            ) {
-                val gone = if (episodeKey != null) {
-                    com.music.spotui.data.offline.PodcastDownloader.remove(downloadKey)
-                    true
-                } else com.music.spotui.data.offline.OfflineCollections.removeSong(downloadKey)
-                toast(if (gone) context.getString(R.string.toast_undownload) else com.music.spotui.data.offline.OfflineCollections.keptMessage(context, downloadKey))
-                onDismiss()
-            }
-            offline == com.music.spotui.data.offline.OfflineStatus.Queued ||
-                offline is com.music.spotui.data.offline.OfflineStatus.Downloading -> ImmersiveSheetRow(
-                null, stringResource(R.string.download_cancel),
-                leading = { DownloadBadge(offline, size = 22.dp) },
-            ) {
-                if (episodeKey != null) com.music.spotui.data.offline.PodcastDownloader.cancel(downloadKey)
-                else com.music.spotui.data.offline.OfflineDownloader.cancel(downloadKey)
-                onDismiss()
-            }
-            else -> ImmersiveSheetRow(
-                Icons.Rounded.ArrowCircleDown, stringResource(R.string.context_menu_download),
-                enabled = downloadKey.isNotBlank(),
-                leading = if (offline != null) ({ DownloadBadge(offline, size = 22.dp) }) else null,
-            ) {
-                if (episodeKey != null) {
-                    com.music.spotui.data.offline.PodcastDownloader.enqueue(song)
-                } else com.music.spotui.ui.components.DownloadAsk.start(context) { q ->
-                    com.music.spotui.data.offline.OfflineCollections.downloadSong(song, q)
-                    Haptics.confirm()
-                    toast(context.getString(R.string.download_notification_downloading))
-                }
-                onDismiss()
-            }
-        }
 
-        ImmersiveSheetRow(Icons.Rounded.Radio, stringResource(R.string.context_menu_go_to_song_radio), enabled = hasId) {
-            onDismiss()
-            playerViewModel.goToSongRadio(song.spotifyTrackId, song.title,
-                navigate = { route -> navController.navigate(route) },
-                onFailed = { toast(context.getString(R.string.song_radio_failed)) })
-        }
-        ImmersiveSheetRow(Icons.Rounded.Album, stringResource(R.string.context_menu_browse_album), enabled = !isRadio && (song.album.isNotBlank() || song.albumId.isNotBlank())) {
-            onDismiss()
-            navController.navigate(albumRoute(song.album, song.singer, song.albumId))
-        }
-        ImmersiveSheetRow(Icons.Rounded.Person, stringResource(R.string.context_menu_browse_artist), enabled = !isRadio && song.singer.isNotBlank()) {
-            onDismiss()
-            playerViewModel.goToArtist(song.spotifyTrackId, song.singer) { route -> navController.navigate(route) }
-        }
-        ImmersiveSheetRow(Icons.Rounded.Info, stringResource(R.string.track_credits), enabled = hasId) { showCredits = true }
-        }
-        ImmersiveSheetRow(Icons.Rounded.Info, stringResource(R.string.track_credits), enabled = hasId) { showCredits = true }
->>>>>>> upstream/main
+
         if (nowPlaying && hasId && !song.url.startsWith("episode:")) {
             ImmersiveSheetRow(Icons.Rounded.Lightbulb, stringResource(R.string.lyrics_meaning_title)) { showMeaning = true }
         }
@@ -260,28 +194,27 @@ fun ImmersiveSongOptionsSheet(
                 ?.equals(target.substringBefore('-'), ignoreCase = true) == true
 
             if (lyrics != null) {
-                ImmersiveSheetRow(Icons.Rounded.Share, stringResource(R.string.lyrics_share)) {
-                    lyricsVm.startSelecting()
-                    onDismiss()
+                if (!sameLanguage) {
+                    val translateLang = com.music.spotui.data.preferences.getLyricTranslateLang(context)
+                    val on = translateLang.isNotEmpty()
+                    ImmersiveSheetRow(
+                        Icons.Rounded.Translate, stringResource(R.string.lyrics_translation_title),
+                        tint = if (on) LocalImmersiveSheetTint.current.accent else null,
+                    ) {
+                        if (on) com.music.spotui.data.preferences.setLyricTranslateLang(context, "")
+                        else com.music.spotui.data.preferences.setLyricTranslateLang(context, target)
+                        onDismiss()
+                    }
                 }
-            }
-            if (lyrics != null && !sameLanguage) {
-                ImmersiveSheetRow(
-                    Icons.Rounded.Translate,
-                    stringResource(if (lyrics.showTranslation) R.string.lyrics_fullscreen_translate_button_enabled_readout_value else R.string.lyrics_fullscreen_context_menu_main_page_translate_lyrics_action),
-                ) {
-                    lyricsVm.toggleTranslation(target)
-                    onDismiss()
-                }
-            }
-            if (lyrics != null && lyrics.lyrics.hasRomanization) {
-                val on = com.music.spotui.data.preferences.LyricsRomanizationPref.on
-                ImmersiveSheetRow(
-                    Icons.Rounded.SortByAlpha, stringResource(R.string.lyrics_romanization),
-                    tint = if (on) LocalImmersiveSheetTint.current.accent else null,
-                ) {
-                    com.music.spotui.data.preferences.LyricsRomanizationPref.set(context, !on)
-                    onDismiss()
+                if (lyrics.lyrics.hasRomanization) {
+                    val on = com.music.spotui.data.preferences.LyricsRomanizationPref.on
+                    ImmersiveSheetRow(
+                        Icons.Rounded.SortByAlpha, stringResource(R.string.lyrics_romanization),
+                        tint = if (on) LocalImmersiveSheetTint.current.accent else null,
+                    ) {
+                        com.music.spotui.data.preferences.LyricsRomanizationPref.set(context, !on)
+                        onDismiss()
+                    }
                 }
             }
         }
@@ -293,49 +226,6 @@ fun ImmersiveSongOptionsSheet(
             }
         }
 
-        val trackUri = "spotify:track:${song.spotifyTrackId}"
-        val excluded by produceState<Boolean?>(null, trackUri) {
-            value = if (!hasId) null else runCatching { app.myspoti.host.android.MyspotiRuntime.api.extras.isExcludedFromTaste(listOf(trackUri)).single() }.getOrNull()
-        }
-        ImmersiveSheetRow(Icons.Rounded.Block, stringResource(if (excluded == true) R.string.include_taste else R.string.exclude_taste), enabled = hasId && excluded != null) {
-            val exclude = excluded != true
-            app.myspoti.host.android.MyspotiRuntime.scope.launch {
-                runCatching { app.myspoti.host.android.MyspotiRuntime.api.extras.setExcludedFromTaste(trackUri, exclude) }
-            }
-            Haptics.confirm()
-            onDismiss()
-        }
-        val artistBan by produceState<Pair<String, Boolean>?>(null, trackUri) {
-            if (!hasId) return@produceState
-            val api = app.myspoti.host.android.MyspotiRuntime.api
-            value = runCatching {
-                val artist = api.catalog.track(trackUri).artists.first().uri
-                artist to api.extras.isArtistBanned(listOf(artist)).single()
-            }.getOrNull()
-        }
-        ImmersiveSheetRow(Icons.Rounded.Block, stringResource(if (artistBan?.second == true) R.string.artist_unban else R.string.artist_ban), enabled = artistBan != null) {
-            val (artist, banned) = artistBan ?: return@ImmersiveSheetRow
-            app.myspoti.host.android.MyspotiRuntime.scope.launch {
-                runCatching { app.myspoti.host.android.MyspotiRuntime.api.extras.setArtistBanned(artist, !banned) }
-            }
-            toast(context.getString(if (banned) R.string.artist_unbanned else R.string.artist_banned, song.singer.substringBefore(",").trim()))
-            Haptics.confirm()
-            onDismiss()
-        }
-        if (song.url.startsWith("episode:")) {
-            val episodeUri = "spotify:episode:" + song.url.removePrefix("episode:")
-            val saved by produceState<Boolean?>(null, episodeUri) {
-                value = runCatching { app.myspoti.host.android.MyspotiRuntime.api.library.contains(listOf(episodeUri)).single() }.getOrNull()
-            }
-            ImmersiveSheetRow(Icons.Rounded.Bookmark, stringResource(if (saved == true) R.string.episode_unsave else R.string.episode_save), enabled = saved != null) {
-                val save = saved != true
-                app.myspoti.host.android.MyspotiRuntime.scope.launch {
-                    runCatching { app.myspoti.host.android.MyspotiRuntime.api.podcasts.setEpisodeSaved(episodeUri, save) }
-                }
-                Haptics.confirm()
-                onDismiss()
-            }
-        }
         if (nowPlaying && song.url.startsWith("episode:")) {
             ImmersiveSheetRow(Icons.Rounded.Speed, stringResource(R.string.playback_speed)) { showSpeed = true }
         }
@@ -347,7 +237,6 @@ fun ImmersiveSongOptionsSheet(
             }
         }
         ImmersiveSheetRow(Icons.Rounded.Share, stringResource(R.string.context_menu_share), enabled = hasId || isRadio) {
-            // A station has no Spotify uri: shared as plain text, never through a Spotify Code.
             if (isRadio) com.music.spotui.radio.RadioPlayer.share(context)
             else SpotifyCode.show(ShareTarget("spotify:track:${song.spotifyTrackId}", song.title, song.singer, song.coverUri))
             onDismiss()
@@ -360,21 +249,22 @@ fun ImmersiveSongOptionsSheet(
             ) { showSleep = true }
 
             ImmersiveSheetRow(
-                androidx.compose.material.icons.Icons.Rounded.DirectionsCar,
+                Icons.Rounded.DirectionsCar,
                 "Car Mode",
             ) {
                 onDismiss()
                 com.music.spotui.car.CarModeManager.enterCarMode(context)
                 navController.navigate(com.music.spotui.ui.navigation.Routes.CarMode.route)
             }
-            // The player's source line and capsule are turned off: their sheets are here instead.
+
+
             if (!com.music.spotui.data.preferences.PlayerSourceLinePref.shown) {
                 ImmersiveSheetRow(Icons.Rounded.GraphicEq, stringResource(R.string.quality_sheet_title)) { showQuality = true }
             }
             if (!com.music.spotui.data.preferences.PlayerCapsulePref.shown) {
                 ImmersiveSheetRow(Icons.Rounded.Devices, stringResource(R.string.listen_on)) { showDevices = true }
             }
-            ImmersiveSheetRow(Icons.Rounded.Analytics, stringResource(R.string.nerd_title)) { showNerd = true }
+
         }
 
         // Extension menu entries
@@ -395,21 +285,9 @@ private fun RecommendationsSheet(
     onDismiss: () -> Unit,
 ) {
     val hasId = song.spotifyTrackId.isNotBlank()
-    val trackUri = "spotify:track:${song.spotifyTrackId}"
     fun toast(text: String) = Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
 
     val hidden = if (hasId) com.music.spotui.data.preferences.HiddenSongs.isHidden(song.spotifyTrackId) else false
-    val excluded by produceState<Boolean?>(null, trackUri) {
-        value = if (!hasId) null else runCatching { app.myspoti.host.android.MyspotiRuntime.api.extras.isExcludedFromTaste(listOf(trackUri)).single() }.getOrNull()
-    }
-    val artistBan by produceState<Pair<String, Boolean>?>(null, trackUri) {
-        if (!hasId) return@produceState
-        val api = app.myspoti.host.android.MyspotiRuntime.api
-        value = runCatching {
-            val artist = api.catalog.track(trackUri).artists.first().uri
-            artist to api.extras.isArtistBanned(listOf(artist)).single()
-        }.getOrNull()
-    }
 
     ImmersiveSheet(onDismiss = onDismiss, imageUrl = song.coverUri) {
         ImmersiveSheetHeader(title = stringResource(R.string.manage_recommendations), subtitle = song.title, coverUrl = song.coverUri)
@@ -422,33 +300,6 @@ private fun RecommendationsSheet(
             ) {
                 if (hidden) com.music.spotui.data.preferences.HiddenSongs.show(context, song.spotifyTrackId)
                 else SongPlayer.hideSong(song)
-                Haptics.confirm()
-                onDismiss()
-            }
-
-            ImmersiveSheetRow(
-                icon = Icons.Rounded.Block,
-                label = stringResource(if (excluded == true) R.string.include_taste else R.string.exclude_taste),
-                enabled = excluded != null,
-            ) {
-                val exclude = excluded != true
-                app.myspoti.host.android.MyspotiRuntime.scope.launch {
-                    runCatching { app.myspoti.host.android.MyspotiRuntime.api.extras.setExcludedFromTaste(trackUri, exclude) }
-                }
-                Haptics.confirm()
-                onDismiss()
-            }
-
-            ImmersiveSheetRow(
-                icon = Icons.Rounded.Person,
-                label = stringResource(if (artistBan?.second == true) R.string.artist_unban else R.string.artist_ban),
-                enabled = artistBan != null,
-            ) {
-                val (artist, banned) = artistBan ?: return@ImmersiveSheetRow
-                app.myspoti.host.android.MyspotiRuntime.scope.launch {
-                    runCatching { app.myspoti.host.android.MyspotiRuntime.api.extras.setArtistBanned(artist, !banned) }
-                }
-                toast(context.getString(if (banned) R.string.artist_unbanned else R.string.artist_banned, song.singer.substringBefore(",").trim()))
                 Haptics.confirm()
                 onDismiss()
             }

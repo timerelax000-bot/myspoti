@@ -49,6 +49,7 @@ sealed class Routes(
     object Accounts : Routes(0, "Accounts", "accounts")
     object CarMode : Routes(0, "CarMode", "carmode")
     object CarModeSettings : Routes(0, "CarModeSettings", "carmode_settings")
+    object TvMode : Routes(0, "TvMode", "tvmode")
     object FullscreenPlayer : Routes(0, "FullscreenPlayer", "fullscreen_player")
 }
 

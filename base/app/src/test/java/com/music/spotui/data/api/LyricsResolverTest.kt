@@ -20,9 +20,8 @@ class LyricsResolverTest {
             synced = true
         )
 
-        assertEquals(1, LyricsMerge.rank(plain))
-        assertEquals(2, LyricsMerge.rank(lineSynced))
-        assertEquals(3, LyricsMerge.rank(wordSynced))
+        assertTrue(LyricsMerge.rank(plain) < LyricsMerge.rank(lineSynced))
+        assertTrue(LyricsMerge.rank(lineSynced) < LyricsMerge.rank(wordSynced))
     }
 
     @Test

@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,6 +59,12 @@ fun FullscreenNowPlayingScreen(
     onClose: () -> Unit = { navController.popBackStack() },
 ) {
     val context = LocalContext.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val keepAwake = com.music.spotui.data.preferences.LyricsKeepAwakePref.on
+    DisposableEffect(keepAwake) {
+        view.keepScreenOn = keepAwake
+        onDispose { view.keepScreenOn = false }
+    }
     val currentSongState = Graph.currentSongState
     val title by currentSongState.title
     val artist by currentSongState.singer
@@ -290,7 +297,7 @@ fun FullscreenNowPlayingScreen(
                 IconButton(
                     onClick = {
                         val sh = !currentSongState.shuffle.value
-                        currentSongState.updateShuffleState(sh)
+                        currentSongState.shuffle.value = sh
                         SongPlayer.setShuffle(sh)
                     },
                     modifier = Modifier.size(52.dp),

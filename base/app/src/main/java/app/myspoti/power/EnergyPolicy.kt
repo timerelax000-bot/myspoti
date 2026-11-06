@@ -17,15 +17,15 @@ data class EnergyPolicy(
          * followed (it already lowers the screen's refresh rate by itself).
          */
         fun resolve(manualSaver: Boolean, blackPreference: Boolean, canvasEnabled: Boolean = true): EnergyPolicy {
-            val saver = manualSaver
+            val saver = manualSaver || com.music.spotui.data.DataSaver.metered
             return EnergyPolicy(
                 saverEnabled = saver,
                 oledBlack = blackPreference,
                 allowCanvas = !saver && canvasEnabled,
-                videoMaxHeight = if (saver) 480 else 1080,
-                allowBackgroundLookups = !saver,
-                progressFps = if (saver) 20 else 30,
-                displayRefreshCap = if (saver) 60f else 0f,
+                videoMaxHeight = 1080,
+                allowBackgroundLookups = true,
+                progressFps = 30,
+                displayRefreshCap = 0f,
             )
         }
     }

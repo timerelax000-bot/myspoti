@@ -110,7 +110,7 @@ fun ImmersivePlayerOverlay(navController: NavController) {
     // Edge-to-edge true fullscreen on TV and horizontal/landscape phone
     val context = androidx.compose.ui.platform.LocalContext.current
     val config = androidx.compose.ui.platform.LocalConfiguration.current
-    val isTv = remember { com.music.spotui.tv.TvDetect.isTv(context) }
+    val isTv = remember { com.music.spotui.ui.tv.Tv.isTv(context) }
     val isLandscapeOrTv = isTv || config.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
     androidx.compose.runtime.DisposableEffect(open, isLandscapeOrTv) {

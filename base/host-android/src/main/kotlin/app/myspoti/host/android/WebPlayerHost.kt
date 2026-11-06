@@ -793,7 +793,6 @@ class WebPlayerHost(
             if (done.isSuccess) accounts.update { it.deleted(name) }
             else Logbook.log("account: a removed profile is still in use, deleted later (${done.exceptionOrNull()?.javaClass?.simpleName})")
         }
->>>>>>> upstream/main
     }
 
     private var loginProbes = 0
@@ -959,7 +958,7 @@ class WebPlayerHost(
         main.removeCallbacksAndMessages(null)
         onPageLoaded = null
         onPageStarting = null
-        detach()
+        container?.let { detach(it) }
         runCatching { view.stopLoading() }
         runCatching { (view as? AwakeWebView)?.releaseFromWindow() }
         runCatching { view.destroy() }
