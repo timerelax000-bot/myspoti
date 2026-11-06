@@ -121,3 +121,20 @@ Copyright The Chromium Authors. Casting to Google Cast devices
 (`base/app/src/main/java/com/music/spotui/cast/`) is Myspoti's own CastV2 sender, without the
 Google Cast SDK. `CastMessage.kt` codes by hand the `CastMessage` message that this file defines
 (its field numbers and types); no Chromium code is included.
+
+## Spicy Player / Spicy Lyrics — AGPL-3.0
+https://github.com/TheX24/spicy-player-old
+https://github.com/Spikerko/spicy-lyrics
+https://github.com/spicylyrics/mobile
+
+By the Spicy Lyrics & Spicy Player authors. The landscape cinematic player, artwork presentation,
+proportional layout metrics (`LandscapeMetrics`), stage feathering, dynamic artwork backgrounds,
+and lyrics rendering algorithms are adapted directly from Spicy Player / Spicy Lyrics mobile.
+These components stay under the AGPL-3.0 (see `base/licenses/AGPL-3.0.txt`), as permitted by the
+compatibility provisions between GPL-3.0 and AGPL-3.0 (AGPL-3.0 Section 13).
+
+Adapted/ported files:
+- `LandscapeMetrics.kt` (proportional landscape desktop geometry calculations)
+- `ImmersivePlayer.kt` (landscape player visual composition, stage, dock and control layouts)
+- `CoverStage.kt` (feathered artwork stage and metadata dock presentation)
+

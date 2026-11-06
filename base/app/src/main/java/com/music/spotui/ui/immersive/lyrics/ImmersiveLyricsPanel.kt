@@ -13,6 +13,7 @@
 package com.music.spotui.ui.immersive.lyrics
 
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material.icons.rounded.Abc
 import androidx.compose.material.icons.rounded.Translate
 import com.music.spotui.ui.components.secondaryClick
@@ -639,6 +640,66 @@ private fun LyricsList(
                     head.announceJump()
                     SongPlayer.seekTo(timeMs)
                     SongPlayer.play()
+                },
+            )
+        }
+        item {
+            LyricsAttributionFooter(lyrics = lyrics)
+        }
+    }
+}
+
+@Composable
+private fun LyricsAttributionFooter(lyrics: Lyrics, modifier: Modifier = Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val provider = lyrics.provider ?: return
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 32.dp, horizontal = GLOW_ROOM),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = stringResource(R.string.lyrics_provided_by, provider),
+            style = Immersive.Caption.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+            color = Immersive.TextSecondary,
+        )
+        if (!lyrics.uploader.isNullOrBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Uploaded by: ${lyrics.uploader}",
+                style = Immersive.Caption.copy(fontSize = 12.sp),
+                color = Immersive.TextSecondary.copy(alpha = 0.8f),
+            )
+        }
+        if (!lyrics.maker.isNullOrBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Synced by: ${lyrics.maker}",
+                style = Immersive.Caption.copy(fontSize = 12.sp),
+                color = Immersive.TextSecondary.copy(alpha = 0.8f),
+            )
+        }
+        if (!lyrics.songwriters.isNullOrEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Songwriters: ${lyrics.songwriters.joinToString(", ")}",
+                style = Immersive.Caption.copy(fontSize = 12.sp),
+                color = Immersive.TextSecondary.copy(alpha = 0.8f),
+                textAlign = TextAlign.Center,
+            )
+        }
+        if (!lyrics.sourceUrl.isNullOrBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = lyrics.sourceUrl,
+                style = Immersive.Caption.copy(fontSize = 11.sp),
+                color = Color(0xFF1DB954),
+                modifier = Modifier.clickable {
+                    runCatching {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(lyrics.sourceUrl))
+                        context.startActivity(intent)
+                    }
                 },
             )
         }

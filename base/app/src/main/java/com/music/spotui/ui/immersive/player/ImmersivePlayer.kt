@@ -14,7 +14,16 @@
 package com.music.spotui.ui.immersive.player
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.Crossfade
+import androidx.compose.animation.*
+import androidx.compose.ui.draw.blur
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Devices
+import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -105,6 +114,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
@@ -282,9 +292,9 @@ fun ImmersivePlayer(
     navController: NavController? = null,
 ) {
     val view = androidx.compose.ui.platform.LocalView.current
-    val keepAwake = com.music.spotui.data.preferences.LyricsKeepAwakePref.on
-    androidx.compose.runtime.DisposableEffect(keepAwake) {
-        view.keepScreenOn = keepAwake
+    val keepScreenOnPref by ImmersiveSettingsPref.keepScreenOn.collectAsStateWithLifecycle()
+    androidx.compose.runtime.DisposableEffect(keepScreenOnPref) {
+        view.keepScreenOn = keepScreenOnPref
         onDispose { view.keepScreenOn = false }
     }
 
@@ -363,7 +373,8 @@ fun ImmersivePlayer(
     var canvasShown by remember(canvasUrl) {
         mutableStateOf(canvasUrl != null)
     }
-    val canvasOn = canvasUrl != null && !state.adPlaying && !videoOn
+    val canvasPrefEnabled by ImmersiveSettingsPref.canvasEnabled.collectAsStateWithLifecycle()
+    val canvasOn = canvasUrl != null && !state.adPlaying && !videoOn && canvasPrefEnabled
     // Opening on a clip already showing starts at the end; every later change animates from where it is.
     val canvasOpen = remember { androidx.compose.animation.core.Animatable(if (canvasOn) 1f else 0f) }
     // Opening the player: the heart of the song shown is checked again if its state is old.
@@ -966,6 +977,31 @@ private fun LandscapeTransportRow(
 
 @OptIn(ExperimentalGlideComposeApi::class)
 @Composable
+private fun LandscapeTopActionPill(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    active: Boolean = false,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(if (active) Color.White.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.40f))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (active) Color(0xFF1DB954) else Color.White,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@OptIn(ExperimentalGlideComposeApi::class)
+@Composable
 private fun LandscapePlayer(
     state: ImmersivePlayerState,
     actions: ImmersivePlayerActions,
@@ -991,153 +1027,368 @@ private fun LandscapePlayer(
 ) {
     var chromeVisible by remember { mutableStateOf(true) }
     var lastNavMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    // Auto-hide timer: while playing, hide transport controls after 6s of inactivity
     LaunchedEffect(chromeVisible, lastNavMs, state.playing) {
-        if (!chromeVisible || !state.playing) return@LaunchedEffect
+        if (!state.playing) {
+            chromeVisible = true
+            return@LaunchedEffect
+        }
+        if (!chromeVisible) return@LaunchedEffect
         while (isActive) {
             delay(500)
-            if (System.currentTimeMillis() - lastNavMs > 6_000L) { chromeVisible = false; break }
+            if (System.currentTimeMillis() - lastNavMs > 6_000L) {
+                chromeVisible = false
+                break
+            }
         }
     }
+
     val idle by animateFloatAsState(
-        if (chromeVisible) 0f else 1f,
-        if (chromeVisible) tween(240, easing = FastOutSlowInEasing) else tween(1600, easing = FastOutSlowInEasing),
+        if (chromeVisible || !state.playing) 0f else 1f,
+        if (chromeVisible || !state.playing) tween(240, easing = FastOutSlowInEasing) else tween(1200, easing = FastOutSlowInEasing),
         label = "idle",
     )
     val chromeAlpha = 1f - idle
 
-    val coverShiftDp by animateDpAsState(
-        targetValue = if (chromeVisible) 0.dp else 44.dp,
-        animationSpec = tween(350, easing = FastOutSlowInEasing),
-        label = "coverShift",
-    )
+    val density = androidx.compose.ui.platform.LocalDensity.current
 
-    Box(
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
                 detectTapGestures(onTap = {
                     lastNavMs = System.currentTimeMillis()
-                    chromeVisible = !chromeVisible
+                    if (!chromeVisible) {
+                        chromeVisible = true
+                    }
                 })
             },
     ) {
-        // Base Mesh Background
-        com.music.spotui.ui.look.MeshGradientBackground(palette, Modifier.fillMaxSize(), trackKey = state.title)
+        val pageWidthPx = with(density) { maxWidth.toPx() }
+        val pageHeightPx = with(density) { maxHeight.toPx() }
+        val landscapeMetrics = remember(pageWidthPx, pageHeightPx, density.density) {
+            LandscapeMetrics(
+                pageWidthPx = pageWidthPx,
+                pageHeightPx = pageHeightPx,
+                density = density.density,
+                topPx = 0f,
+                timelineOutside = false,
+            )
+        }
 
-        if (canvasOn && canvasUrl != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(0.55f),
-            ) {
+        val isCanvasActive = canvasOn && canvasUrl != null
+
+        // FULL-SCREEN CINEMATIC BACKGROUND SYSTEM (Real-time Canvas blending)
+        if (isCanvasActive && canvasUrl != null) {
+            // MODE 1: CANVAS AVAILABLE -> Video-driven full-screen ambient background blending in real-time. NO ALBUM COVER AT ALL.
+            Box(Modifier.fillMaxSize()) {
                 com.music.spotui.ui.screens.CanvasVideo(
                     url = canvasUrl,
                     playing = state.playing,
                     onFirstFrame = {},
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = 0.65f
+                            scaleX = 1.38f
+                            scaleY = 1.38f
+                        }
+                        .blur(80.dp),
                 )
-            }
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.horizontalGradient(
-                            0f to Color.Transparent,
-                            0.35f to Color(0x22000000),
-                            0.55f to Color(0x99000000),
-                            0.80f to Color(0xEE000000),
-                            1f to Color(0xFD000000),
+                // Real-time radial vignette for seamless contrast & edge blending
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f)),
+                                radius = 1200f,
+                            )
                         )
-                    )
-            )
+                )
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.40f)))
+            }
         } else {
-            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color(0x33000000), 0.45f to Color(0x55000000), 1f to Color(0xAA000000))))
+            // MODE 2: NO CANVAS AVAILABLE -> Clean Full-screen Dynamic Mesh Background (No duplicate behind cover)
+            com.music.spotui.ui.look.MeshGradientBackground(palette, Modifier.fillMaxSize(), trackKey = state.title)
         }
 
         Row(
-            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 28.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(36.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding(),
         ) {
-            Column(
+            // LEFT PANEL (~45% of screen width)
+            Box(
                 Modifier
-                    .width(360.dp)
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .fillMaxWidth(0.45f)
+                    .fillMaxHeight()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
             ) {
-                if (canvasOn) {
-                    // Picture 1: Canvas active - top action buttons
-                    Row(
-                        modifier = Modifier.fillMaxWidth().graphicsLayer { alpha = chromeAlpha },
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        IconButton(onClick = onToggleQueue, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Queue", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(20.dp))
-                        }
-                        IconButton(onClick = onOpenDevices, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.Devices, contentDescription = "Devices", tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(20.dp))
-                        }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    // Bottom-left info & scrubber
-                    Text(state.title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
-                    Text(state.artist, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(6.dp))
-                    PlayerScrubber(state = state, onSeek = actions.seekTo)
-                    Spacer(Modifier.height(6.dp))
-                    Box(modifier = Modifier.graphicsLayer { alpha = chromeAlpha }) {
-                        LandscapeTransportRow(
-                            state = state,
-                            actions = actions,
-                            volume = volume,
-                            onOpenDevices = onOpenDevices,
+                if (isCanvasActive && canvasUrl != null) {
+                    // STATE A: Canvas Video Available -> Foreground video fills left area, blending into ambient background.
+                    Box(Modifier.fillMaxSize()) {
+                        com.music.spotui.ui.screens.CanvasVideo(
+                            url = canvasUrl,
+                            playing = state.playing,
+                            onFirstFrame = {},
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)),
+                        )
+                        // Real-time subtle gradient overlay for text readability over Canvas video
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(
+                                    Brush.verticalGradient(
+                                        0.0f to Color.Black.copy(alpha = 0.20f),
+                                        0.4f to Color.Transparent,
+                                        0.7f to Color.Black.copy(alpha = 0.50f),
+                                        1.0f to Color.Black.copy(alpha = 0.85f),
+                                    )
+                                )
+                        )
+                        // Gestures overlay over Canvas Video: Swipe left/right = next/prev, Double tap = pause/play
+                        ArtworkGestureOverlay(
+                            enabled = true,
+                            onSwipeNext = { actions.next(); lastNavMs = System.currentTimeMillis() },
+                            onSwipePrevious = { actions.previous(); lastNavMs = System.currentTimeMillis() },
+                            onDoubleTap = { actions.playPause(); lastNavMs = System.currentTimeMillis() },
+                            onLongPress = { if (onMore != null) onMore(); lastNavMs = System.currentTimeMillis() },
+                            onSingleTap = {
+                                lastNavMs = System.currentTimeMillis()
+                                if (!chromeVisible) chromeVisible = true
+                            },
+                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 } else {
-                    // Picture 3: Canvas NOT active - Large Cover, Scrubber immediately below, Title & Artist centered, Transport controls below!
-                    Crossfade(state.coverUrl, animationSpec = tween(800), label = "cover") { url ->
-                        com.music.spotui.ui.tv.TvCover(url, Modifier.size(210.dp), RoundedCornerShape(16.dp))
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    PlayerScrubber(state = state, onSeek = actions.seekTo)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        state.title,
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
+                    // STATE B: Canvas NOT Available -> Large Album Artwork
+                    val outerMaxWidth = this@BoxWithConstraints.maxWidth
+                    val outerMaxHeight = this@BoxWithConstraints.maxHeight
+                    val availableHeightDp = outerMaxHeight - 32.dp
+                    val coverSizeDp = minOf(outerMaxWidth * 0.40f, availableHeightDp * 0.58f, 320.dp).coerceAtLeast(240.dp)
+
+                    // Position: Centered when controls hidden, glides upward smoothly when controls expand
+                    val artShiftUpDp by animateDpAsState(
+                        targetValue = if (chromeVisible || !state.playing) 24.dp else 0.dp,
+                        animationSpec = tween(350, easing = FastOutSlowInEasing),
+                        label = "artShiftUp",
                     )
-                    Text(
-                        state.artist,
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Box(modifier = Modifier.graphicsLayer { alpha = chromeAlpha }) {
-                        LandscapeTransportRow(
+
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .offset(y = -artShiftUpDp)
+                            .size(coverSizeDp)
+                            .graphicsLayer {
+                                val scale = pauseScale.value
+                                scaleX = scale
+                                scaleY = scale
+                                shadowElevation = 14.dp.toPx()
+                                shape = ArtCorner
+                                clip = true
+                            }
+                            .background(Color.Black.copy(alpha = 0.2f))
+                    ) {
+                        AnimatedArtworkContainer(
                             state = state,
-                            actions = actions,
-                            volume = volume,
-                            onOpenDevices = onOpenDevices,
+                            blend = state.blend,
+                            isPlaying = state.playing,
+                            animatedArtworkEnabled = animatedArtwork,
+                            reducedMotion = reduceMotion,
+                            canvasActive = false,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        // Gestures overlay over Album Cover: Swipe left/right = next/prev, Double tap = pause/play
+                        ArtworkGestureOverlay(
+                            enabled = true,
+                            onSwipeNext = { actions.next(); lastNavMs = System.currentTimeMillis() },
+                            onSwipePrevious = { actions.previous(); lastNavMs = System.currentTimeMillis() },
+                            onDoubleTap = { actions.playPause(); lastNavMs = System.currentTimeMillis() },
+                            onLongPress = { if (onMore != null) onMore(); lastNavMs = System.currentTimeMillis() },
+                            onSingleTap = {
+                                lastNavMs = System.currentTimeMillis()
+                                if (!chromeVisible) chromeVisible = true
+                            },
+                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
+
+                // TOP DISCREET ACTION BAR: Separate buttons for Lyrics, Queue, Shuffle, Repeat, Devices, Options (Top part of Album / Canvas)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 8.dp),
+                ) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = chromeVisible || !state.playing,
+                        enter = fadeIn(tween(300)) + slideInVertically(tween(300)) { -it / 2 },
+                        exit = fadeOut(tween(400)) + slideOutVertically(tween(400)) { -it / 2 },
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(Color.Black.copy(alpha = 0.45f))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        ) {
+                        LandscapeTopActionPill(
+                            icon = Icons.Rounded.Lyrics,
+                            active = panel == Panel.LYRICS,
+                            contentDescription = stringResource(R.string.immersive_player_lyrics),
+                            onClick = { onToggleLyrics(); lastNavMs = System.currentTimeMillis() },
+                        )
+                        LandscapeTopActionPill(
+                            icon = Icons.AutoMirrored.Rounded.QueueMusic,
+                            active = panel == Panel.QUEUE,
+                            contentDescription = stringResource(R.string.immersive_player_queue),
+                            onClick = { onToggleQueue(); lastNavMs = System.currentTimeMillis() },
+                        )
+                        LandscapeTopActionPill(
+                            icon = if (state.smart) Icons.Rounded.AutoAwesome else Icons.Rounded.Shuffle,
+                            active = state.shuffle || state.smart,
+                            contentDescription = stringResource(R.string.immersive_player_shuffle_on),
+                            onClick = { actions.toggleShuffle(); lastNavMs = System.currentTimeMillis() },
+                        )
+                        LandscapeTopActionPill(
+                            icon = if (state.repeatMode == 2) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                            active = state.repeatMode != 0,
+                            contentDescription = stringResource(R.string.immersive_player_repeat_all),
+                            onClick = { actions.cycleRepeat(); lastNavMs = System.currentTimeMillis() },
+                        )
+                        LandscapeTopActionPill(
+                            icon = Icons.Rounded.Devices,
+                            active = state.deviceName != null,
+                            contentDescription = stringResource(R.string.immersive_player_devices),
+                            onClick = { onOpenDevices(); lastNavMs = System.currentTimeMillis() },
+                        )
+                        if (onMore != null) {
+                            LandscapeTopActionPill(
+                                icon = Icons.Rounded.MoreHoriz,
+                                active = false,
+                                contentDescription = stringResource(R.string.immersive_player_more),
+                                onClick = { onMore(); lastNavMs = System.currentTimeMillis() },
+                            )
+                        }
+                    }
+                  }
+                }
+
+                // Bottom Dock: PERSISTENT Song Info & Progress Scrubber flush against bottom edge
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(bottom = 0.dp),
+                    horizontalAlignment = Alignment.Start,
+                ) {
+                    // PERSISTENT: Song Title & Artist (FLUSH AT BOTTOM EDGE)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = if (state.adPlaying) stringResource(R.string.immersive_player_ad) else state.title,
+                                    style = Immersive.Title.copy(fontSize = 18.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold),
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .weight(1f, fill = false)
+                                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { actions.openAlbum() }
+                                        .titleMarquee(enabled = true, iterations = Int.MAX_VALUE),
+                                )
+                                if (state.explicit && !state.adPlaying) {
+                                    Spacer(Modifier.width(6.dp))
+                                    Box(
+                                        Modifier.size(16.dp).clip(RoundedCornerShape(3.dp)).background(tint.copy(alpha = 0.5f)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.explicit_badge),
+                                            style = Immersive.Caption.copy(fontSize = 10.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold),
+                                            color = Color.Black,
+                                        )
+                                    }
+                                }
+                            }
+                            if (!state.adPlaying) {
+                                val credit = com.music.spotui.ui.components.rememberArtistCredit(state.trackId, state.artist, tint.copy(alpha = 0.75f)) { a -> actions.openArtistRef(a) }
+                                Text(
+                                    text = credit ?: androidx.compose.ui.text.AnnotatedString(state.artist),
+                                    style = Immersive.Title.copy(fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.W500),
+                                    color = tint.copy(alpha = 0.75f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { actions.openArtist() }
+                                        .titleMarquee(enabled = true, iterations = Int.MAX_VALUE),
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+
+                    // PERSISTENT: Progress Scrubber & Timestamps (FLUSH AT BOTTOM EDGE)
+                    PlayerScrubber(
+                        state = state,
+                        onSeek = { ms ->
+                            actions.seekTo(ms)
+                            lastNavMs = System.currentTimeMillis()
+                        }
+                    )
+                }
             }
 
-            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+            // RIGHT PANEL (~55% of screen width: Spicy Lyrics Canvas View or Queue)
+            val vm: com.music.spotui.ui.viewmodel.LyricsViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+            val lyricsState = com.music.spotui.ui.screens.rememberLyricsState(vm, state.title, state.artist, state.blend?.outgoingWords == true)
+            val parsedLyrics = remember(lyricsState, state.trackId) {
+                if (lyricsState is com.music.spotui.ui.viewmodel.LyricsViewModel.State.Loaded) {
+                    com.music.spotui.ui.immersive.lyrics.spicy.SpicyLyricsMapper.mapToSpicy(lyricsState.lyrics, state.trackId)
+                } else null
+            }
+
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .padding(vertical = 8.dp, horizontal = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
                 Crossfade(targetState = panel, animationSpec = tween(250), modifier = Modifier.fillMaxSize(), label = "playerLandscapePanel") { shown ->
                     when (shown) {
-                        Panel.QUEUE -> ImmersiveQueuePanel(Modifier.fillMaxSize(), PaddingValues(vertical = 4.dp))
-                        else -> ImmersiveLyricsPanel(Modifier.fillMaxSize(), PaddingValues(vertical = 4.dp))
+                        Panel.QUEUE -> ImmersiveQueuePanel(Modifier.fillMaxSize(), PaddingValues(vertical = 8.dp))
+                        else -> {
+                            val parsed = parsedLyrics
+                            if (parsed != null) {
+                                com.tx24.spicyplayer.lyrics.spicy.canvas.LyricsView(
+                                    lines = parsed.lines,
+                                    documentId = parsed.documentId,
+                                    footer = parsed.footer,
+                                    lyricsType = parsed.type,
+                                    currentTimeMs = { com.music.spotui.di.SongPlayer.getCurrentPosition().coerceAtLeast(0L) },
+                                    onSeekWord = { ms ->
+                                        actions.seekTo(ms)
+                                        lastNavMs = System.currentTimeMillis()
+                                    },
+                                    isPlaying = state.playing,
+                                    fontSizeScale = (landscapeMetrics.lyricFontSizeSp / 32f).coerceIn(0.9f, 2.2f),
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                ImmersiveLyricsPanel(Modifier.fillMaxSize(), PaddingValues(vertical = 8.dp))
+                            }
+                        }
                     }
                 }
             }

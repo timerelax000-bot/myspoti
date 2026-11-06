@@ -5,6 +5,7 @@ import com.music.spotui.data.entity.LyricLine
 import com.music.spotui.data.entity.LyricWord
 import com.music.spotui.data.entity.Lyrics
 import com.music.spotui.data.entity.LyricsColors
+import com.music.spotui.data.entity.SyncPrecision
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -15,19 +16,11 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * Lyrics resolver, in the order of the spec (SPEC-V1 §5), with the provider map of
- * LiriQo / Syncanto (MIT, AlFarrizi-Studio / alfzcore) as reference:
- *
- * 1. Spotify's own color-lyrics, by track id: exactly what the official app shows,
- *    with its colours and credits.
- * 2. LRCLIB (lrclib.net, open API for third-party apps), line-synced or plain.
- * 3. Opt-in ("sources supplémentaires"): NetEase Cloud Music (line-synced LRC) and
- *    Genius (plain text). Off by default.
- *
- * Fallback results are only kept when title, artist and length match the track.
- * A provider failing in a row is set aside and a "no lyrics" answer is kept for a while
- * ([LyricsHealth]); [sources] and [fetchFrom] let the user pick one by hand.
- * LRCLIB asks clients to send a descriptive User-Agent; we oblige.
+ * Multi-provider lyrics engine resolving lyrics in priority order:
+ * 1. Spicy Lyrics API
+ * 2. Priority Tier 1 (TTML): AMLL, lrc.red, Unison TTML
+ * 3. Priority Tier 2 (Synchronized): Better Lyrics QQ QRC, LRCMux, LRCLIB, Unison LRC
+ * 4. Priority Tier 3 (Unsynchronized): LRCLIB plain, Lyrics.ovh, Spotify plain/NetEase/Genius, Spicy Static
  */
 object LyricsApi {
     private const val LRCLIB = "https://lrclib.net/api"
@@ -45,59 +38,35 @@ object LyricsApi {
         val key: String get() = trackId.ifBlank { "${title.lowercase()}|${artist.substringBefore(",").trim().lowercase()}" }
     }
 
-    // Cache by track: re-opening the lyrics (card + full screen ask for the same
-    // track) is instant. A miss is cached too, but only for MISS_RETRY_MS — a
-    // "not found" is often just a timeout, not a fact.
     private class Miss(val at: Long = System.currentTimeMillis())
     private const val MISS_RETRY_MS = 120_000L
-    // The lyrics found while an extension had still not answered (cut short behind its other calls):
-    // shown, not stored, and the song asked again after MISS_RETRY_MS, when it may answer.
     private class Partial(val lyrics: Lyrics, val at: Long = System.currentTimeMillis())
-    // Newest MEMORY_MAX tracks only; the older ones are on storage (LyricsDisk) or asked for again.
     private const val MEMORY_MAX = 100
-    private val cache: MutableMap<String, Any> = java.util.Collections.synchronizedMap( // Lyrics | Partial | Miss
+    private val cache: MutableMap<String, Any> = java.util.Collections.synchronizedMap(
         object : LinkedHashMap<String, Any>(128, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Any>) = size > MEMORY_MAX
         }
     )
     private val inFlight = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Lyrics?>>()
     private val health = LyricsHealth()
-    // Set while one provider is asked by hand ([fetchFrom]): it is asked even when set aside.
     private val bypass = ThreadLocal<Boolean>()
     private val scope =
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
-    /** Set by the settings: also ask NetEase and Genius when nothing better is found. */
     @Volatile var extraSources: Boolean = false
-
-    /**
-     * Set by the settings: the user turned the extra sources off by hand. Until then Genius is still
-     * asked as the last resort, when no other source (extensions included) has any lyrics.
-     */
     @Volatile var extraSourcesOff: Boolean = false
-
-    /** Set by the settings: lyrics timed word by word first (karaoke), line by line otherwise. */
     @Volatile var wordSync: Boolean = true
 
-    /** How long a word-synced source is waited for before the line-synced ones answer instead. */
     private const val WORD_WAIT_MS = 4_000L
 
-    /**
-     * The last lyrics shown while better ones are looked for (track key → the app's own lines); read
-     * a song's own with [earlyFor]: the next song's prefetch publishes its own a moment later.
-     */
     val early = kotlinx.coroutines.flow.MutableStateFlow<Pair<String, Lyrics>?>(null)
     private val earlyByKey = java.util.concurrent.ConcurrentHashMap<String, Lyrics>()
 
-    /** What [track] can show while its lyrics are still looked for, or null. */
     fun earlyFor(track: Track): Lyrics? = earlyByKey[track.key]
 
-    /** Lyrics of song [key] that got romanizations from an extension after they were shown: [before] became [after]. */
     data class Romanized(val key: String, val before: Lyrics, val after: Lyrics)
 
-    /** The last [Romanized]: an open lyrics view still showing [Romanized.before] swaps it for [Romanized.after]. */
     val romanized = kotlinx.coroutines.flow.MutableStateFlow<Romanized?>(null)
-
 
     private fun showEarly(track: Track, lyrics: Lyrics) {
         earlyByKey[track.key] = lyrics
@@ -110,7 +79,6 @@ object LyricsApi {
         else -> null
     }
 
-    /** Whether [track]'s lyrics were found with every source's answer: nothing better is to come. */
     fun settled(track: Track): Boolean = cache[track.key] is Lyrics
 
     private fun wanted(track: Track): Boolean {
@@ -123,14 +91,8 @@ object LyricsApi {
         }
     }
 
-    // The song to warm once a song's lyrics are found ([prefetch]'s `then`), by that song's key.
     private val after = java.util.concurrent.ConcurrentHashMap<String, Track>()
 
-    /**
-     * Warm the cache in the background: [track] (the current one), then [then] (the next one) once
-     * [track]'s are found. An extension answers one call at a time: the next song's asked together
-     * with the playing one's went first at times, and the playing one's were cut short.
-     */
     fun prefetch(track: Track, then: Track? = null) {
         if (!wanted(track)) { after.remove(track.key); then?.let { prefetch(it) }; return }
         if (then != null) after[track.key] = then
@@ -140,17 +102,10 @@ object LyricsApi {
 
     fun forget(track: Track) { cache.remove(track.key); health.forgetTrack(track.key); scope.launch { LyricsDisk.drop(track.key) } }
 
-    /** A setting changed what is looked for: every song is read again when next shown. */
     fun forgetAll() { cache.clear(); health.forgetAll(); scope.launch { LyricsDisk.clear() } }
 
-    /** Bumped when the lyrics extensions changed and the cache was dropped: an open lyrics view reads its song again. */
     val sourcesTick = kotlinx.coroutines.flow.MutableStateFlow(0L)
 
-    /**
-     * The lyrics extensions changed (one installed, turned on or off, updated, removed): the songs
-     * not found are asked again, and, but for [keepFound] (the ones on at launch just loaded), the
-     * lyrics found too, from memory and storage, so the new set of sources answers. Off the main thread.
-     */
     fun sourcesChanged(keepFound: Boolean) {
         if (keepFound) synchronized(cache) { cache.values.removeAll { it is Miss || it is Partial } }
         else { cache.clear(); LyricsDisk.clear() }
@@ -158,7 +113,6 @@ object LyricsApi {
         sourcesTick.value++
     }
 
-    /** What is already here for [track], from memory or storage, whole: asks no one. */
     fun known(track: Track): Lyrics? {
         val found = when (val c = cache[track.key]) {
             is Lyrics -> c
@@ -175,11 +129,8 @@ object LyricsApi {
             is Partial -> if (System.currentTimeMillis() - c.at < MISS_RETRY_MS) return c.lyrics
             is Miss -> if (System.currentTimeMillis() - c.at < MISS_RETRY_MS) return null
         }
-        // One request per track even when the card and the full screen ask together.
         val job = synchronized(inFlight) {
             inFlight[track.key] ?: scope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
-                // Read on an earlier run: from storage, not asked for again. A downloaded song's own
-                // (see [keepForOffline]) when there is no connection, or when nothing else had any.
                 (LyricsDisk.read(track.key)?.also { cache[track.key] = it }
                     ?: (if (online()) null else kept(track))
                     ?: resolve(track)
@@ -193,54 +144,53 @@ object LyricsApi {
                 created.start()
             }
         }
-        // A cancelled card only stops waiting; the shared request owns cleanup.
         return job.await()
     }
 
-    /**
-     * A provider that can be asked for a song by hand ("Try another source"). [id] goes to
-     * [fetchFrom]; [name] is shown as it is (a brand, not translated); [words]: it can time the
-     * words; [setAside]: why it is not asked by itself for now (a run of failures), null when it is.
-     */
     data class Source(val id: String, val name: String, val words: Boolean = false, val setAside: String? = null)
 
     private fun allSetAside(vararg ids: String): String? = ids.map { health.reason(it) }.takeIf { r -> r.all { it != null } }?.first()
 
-    private val WORD_SOURCES = setOf("lyricsplus", "lrcred", "kugou")
+    private val WORD_SOURCES = setOf("spicy", "amll", "unison", "qq", "lrcmux", "lyricsplus", "lrcred", "kugou")
 
-    /** The providers that can be tried for [track], in the order the resolver prefers them; the extensions giving lyrics come last (`ext:<id>`). */
     fun sources(track: Track): List<Source> = buildList {
+        if (track.trackId.isNotBlank()) add(Source("spicy", "Spicy Lyrics", words = true, setAside = allSetAside("spicy")))
         if (track.trackId.isNotBlank()) add(Source("spotify", "Spotify", words = true))
-        add(Source("lyricsplus", "LyricsPlus", true, allSetAside(*LYRICS_PLUS.toTypedArray())))
-        add(Source("lrcred", "lrc.red", true, allSetAside("lrcred")))
-        add(Source("kugou", "Kugou", true, allSetAside("kugou")))
-        add(Source("lrclib", "LRCLIB", false, allSetAside("lrclib")))
-        add(Source("netease", "NetEase", false, allSetAside("netease")))
-        add(Source("genius", "Genius", false, allSetAside("genius")))
+        add(Source("amll", "AMLL (TTML)", words = true, setAside = allSetAside("amll")))
+        add(Source("lrcred", "lrc.red", words = true, setAside = allSetAside("lrcred")))
+        add(Source("unison", "Unison", words = true, setAside = allSetAside("unison")))
+        add(Source("qq", "QQ Music (QRC)", words = true, setAside = allSetAside("qq")))
+        add(Source("lrcmux", "LRCMux", words = true, setAside = allSetAside("lrcmux")))
+        add(Source("lyricsplus", "LyricsPlus", words = true, setAside = allSetAside(*LYRICS_PLUS.toTypedArray())))
+        add(Source("kugou", "Kugou", words = true, setAside = allSetAside("kugou")))
+        add(Source("lrclib", "LRCLIB", words = false, setAside = allSetAside("lrclib")))
+        add(Source("netease", "NetEase", words = false, setAside = allSetAside("netease")))
+        add(Source("genius", "Genius", words = false, setAside = allSetAside("genius")))
+        add(Source("lyricsovh", "Lyrics.ovh", words = false, setAside = allSetAside("lyricsovh")))
         runCatching { com.music.spotui.extensions.Extensions.lyricsSources() }.getOrDefault(emptyList())
             .forEach { (id, name) -> add(Source("ext:$id", name)) }
     }
 
-    /** The [Source.id] the shown [lyrics] came from, or null when it cannot tell (an extension's own provider name). */
     fun sourceOf(lyrics: Lyrics): String? {
         val p = lyrics.provider.orEmpty().lowercase()
         return when {
+            "spicy" in p -> "spicy"
+            "amll" in p -> "amll"
+            "lrc.red" in p || "lrcred" in p -> "lrcred"
+            "unison" in p -> "unison"
+            "qq" in p || "qrc" in p -> "qq"
+            "lrcmux" in p -> "lrcmux"
             "lyricsplus" in p -> "lyricsplus"
-            "lrc.red" in p -> "lrcred"
             "kugou" in p -> "kugou"
             "lrclib" in p -> "lrclib"
             "netease" in p -> "netease"
             "genius" in p -> "genius"
+            "lyrics.ovh" in p -> "lyricsovh"
             lyrics.colors != null -> "spotify"
             else -> null
         }
     }
 
-    /**
-     * The lyrics of [track] from the provider [sourceId] alone ([Source.id]), asked at once (a
-     * set-aside provider, a cached "no lyrics" and the cache of the song do not count). What it gives
-     * replaces the song's lyrics in memory and storage; null (nothing changes) when it has none.
-     */
     suspend fun fetchFrom(track: Track, sourceId: String): Lyrics? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val asked = track.title.trim()
         val title = cleanTitle(track.title)
@@ -251,7 +201,12 @@ object LyricsApi {
         val spotify = if (sourceId in WORD_SOURCES) runCatching { fromSpotify(track) }.getOrNull() else null
         val found = try {
             when {
+                sourceId == "spicy" -> byHand { fromSpicyLyrics(track) }
                 sourceId == "spotify" -> fromSpotify(track)
+                sourceId == "amll" -> byHand { fromAmll(track) }
+                sourceId == "unison" -> byHand { fromUnison(track) }
+                sourceId == "qq" -> byHand { fromBetterLyricsQQ(track) }
+                sourceId == "lrcmux" -> byHand { fromLrcMux(track) }
                 sourceId.startsWith("ext:") -> com.music.spotui.extensions.Extensions.lyricsFromExtension(
                     sourceId.removePrefix("ext:"), track.trackId, track.title, track.artist, track.album, durationMs, track.coverUrl)
                 sourceId == "lyricsplus" -> byHand { fromLyricsPlus(asked, title, artist, durationMs) }
@@ -264,11 +219,11 @@ object LyricsApi {
                 }
                 sourceId == "netease" -> byHand { fromNetEase(title, artist, durationSec) }
                 sourceId == "genius" -> byHand { fromGenius(title, artist) }
+                sourceId == "lyricsovh" -> byHand { fromLyricsOvh(track) }
                 else -> null
             }
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { Log.d("LyricsApi", "$sourceId by hand: ${e.javaClass.simpleName}"); null }
         val lyrics = found?.takeIf { !it.isEmpty } ?: return@withContext null
-        // Words from another recording follow Spotify's own timing when that can be checked, and keep its colours.
         val chosen = if (lyrics.wordSynced && spotify != null) (alignTo(lyrics, spotify) ?: lyrics).copy(colors = spotify.colors) else lyrics
         cache[track.key] = chosen
         LyricsDisk.write(track.key, chosen)
@@ -277,12 +232,6 @@ object LyricsApi {
         chosen
     }
 
-    /**
-     * Asks the romanizing extensions, off the caller's path, for the lines of [lyrics] (just found
-     * or read from storage) that their source left in another script than Latin without a
-     * romanization: the lyrics show at once and the romanizations follow ([romanized]). They are
-     * kept, in memory and storage, only while [lyrics] are still the song's.
-     */
     private fun romanizeLater(track: Track, lyrics: Lyrics) {
         val wanted = LyricsRomanize.wanted(lyrics)
         if (wanted.isEmpty() || !runCatching { com.music.spotui.extensions.Extensions.hasRomanizer() }.getOrDefault(false)) return
@@ -293,7 +242,6 @@ object LyricsApi {
             }.getOrDefault(emptyMap())
             val updated = LyricsRomanize.apply(lyrics, found)
             if (updated === lyrics) return@launch
-            // Another source picked or the song forgotten meanwhile: these were for lyrics no longer shown.
             if (!cache.replace(track.key, lyrics, updated)) return@launch
             LyricsDisk.write(track.key, updated)
             romanized.value = Romanized(track.key, lyrics, updated)
@@ -301,58 +249,98 @@ object LyricsApi {
     }
 
     private suspend fun resolve(track: Track): Lyrics? = try { coroutineScope {
-        // Extensions that provide lyrics are asked at the same time as the app's own sources
-        // (each within its time limit); the better answer is kept (LyricsMerge), Spotify's own
-        // complete lyrics first at the same level. Only when those have backing vocals too are
-        // the extensions not waited for. A failure: they did not answer in time (null: none had lyrics).
         val ext = if (extensionsAsked()) async {
             runCatching {
                 com.music.spotui.extensions.Extensions.lyricsFor(track.trackId, track.title, track.artist, track.album, track.durationMs, track.coverUrl)
             }
         } else null
-        val own = if (wordSync) wordFirst(track) else fromSpotify(track) ?: lineFallbacks(track)
-        val answer = when {
-            ext == null -> null
-            own != null && com.music.spotui.extensions.LyricsMerge.level(own) == 3 && com.music.spotui.extensions.LyricsMerge.isSpotifyComplete(own) &&
-                LyricsExtras.hasBacks(own) -> { ext.cancel(); null }
-            else -> {
-                // An extension's time counts from when its call runs, which can be a while behind its
-                // other calls: the app's own lines are shown meanwhile (reported: lyrics only after a refresh).
-                own?.let { showEarly(track, it) }
-                ext.await()
+
+        // 1. FIRST — Spicy Lyrics API
+        var spicyStatic: Lyrics? = null
+        val spicy = asking("spicy", track) { fromSpicyLyrics(track) }
+        if (spicy != null && !spicy.isEmpty) {
+            if (spicy.synced && spicy.syncPrecision != SyncPrecision.STATIC) {
+                return@coroutineScope spicy
+            } else {
+                spicyStatic = spicy
             }
         }
-        var result = com.music.spotui.extensions.LyricsMerge.choose(own, answer?.getOrNull())
-        // Nothing anywhere: Genius's plain text, unless the user turned the extra sources off.
-        if (result == null && !extraSources && !extraSourcesOff)
-            result = asking("genius", track) { fromGenius(cleanTitle(track.title), track.artist.substringBefore(",").trim()) }
-        val pending = answer?.isFailure == true
-        cache[track.key] = when {
-            result == null -> Miss()
-            pending -> Partial(result)
-            else -> result
+
+        // 2. PRIORITY TIER 1 — TTML
+        val amll = asking("amll", track) { fromAmll(track) }
+        if (amll != null && amll.synced) return@coroutineScope amll
+
+        val red = asking("lrcred", track) { fromLrcRed(track.title, cleanTitle(track.title), track.artist, track.durationMs) }
+        if (red != null && red.synced) return@coroutineScope red
+
+        val unisonTtml = asking("unison", track) { fromUnison(track, requiredFormat = "ttml") }
+        if (unisonTtml != null && unisonTtml.synced) return@coroutineScope unisonTtml
+
+        // 3. PRIORITY TIER 2 — SYNCHRONIZED LYRICS
+        val qq = asking("qq", track) { fromBetterLyricsQQ(track) }
+        if (qq != null && qq.synced) return@coroutineScope qq
+
+        val lrcmux = asking("lrcmux", track) { fromLrcMux(track) }
+        if (lrcmux != null && lrcmux.synced) return@coroutineScope lrcmux
+
+        val title = cleanTitle(track.title)
+        val artist = track.artist.substringBefore(",").trim()
+        val durationSec = (track.durationMs / 1000).toInt()
+        val lrclib = asking("lrclib", track) {
+            lrclibGet(title, artist, track.album, durationSec)
+                ?: lrclibSearch("$LRCLIB/search?track_name=${enc(title)}&artist_name=${enc(artist)}", title, artist, durationSec)
+                ?: lrclibSearch("$LRCLIB/search?track_name=${enc(title)}", title, artist, durationSec)
         }
-        if (!pending) result?.let { LyricsDisk.write(track.key, it); keepIfDownloaded(track, it) }
-        Log.d("LyricsApi", "${track.title}: ${result?.let { "${it.lines.size} lines from ${it.provider}, synced=${it.synced}, words=${it.wordSynced}" } ?: "none"}" +
-            if (pending) " (the extensions did not answer in time)" else "")
-        result
+        if (lrclib != null && lrclib.synced) return@coroutineScope lrclib
+
+        val unisonLrc = asking("unison", track) { fromUnison(track, requiredFormat = "lrc") }
+        if (unisonLrc != null && unisonLrc.synced) return@coroutineScope unisonLrc
+
+        val own = if (wordSync) wordFirst(track) else fromSpotify(track) ?: lineFallbacks(track)
+        val extAnswer = ext?.await()?.getOrNull()
+        var result = com.music.spotui.extensions.LyricsMerge.choose(own, extAnswer)
+
+        if (result != null && result.synced) return@coroutineScope result
+
+        // 4. PRIORITY TIER 3 — UNSYNCHRONIZED LYRICS
+        // 1. LRCLIB plainLyrics
+        if (lrclib != null && !lrclib.isEmpty) return@coroutineScope lrclib
+
+        // 2. Lyrics.ovh
+        val lyricsovh = asking("lyricsovh", track) { fromLyricsOvh(track) }
+        if (lyricsovh != null && !lyricsovh.isEmpty) return@coroutineScope lyricsovh
+
+        // 3. Existing supplementary plain-text (Spotify plain, NetEase, Genius)
+        if (result != null && !result.isEmpty) return@coroutineScope result
+
+        val netease = if (extraSources) asking("netease", track) { fromNetEase(title, artist, durationSec) } else null
+        if (netease != null && !netease.isEmpty) return@coroutineScope netease
+
+        val genius = if (extraSources || !extraSourcesOff) asking("genius", track) { fromGenius(title, artist) } else null
+        if (genius != null && !genius.isEmpty) return@coroutineScope genius
+
+        // 4. Spicy Lyrics Static result as final fallback
+        if (spicyStatic != null && !spicyStatic.isEmpty) return@coroutineScope spicyStatic
+
+        val pending = ext?.isCompleted == false
+        val finalRes = result ?: spicyStatic
+        cache[track.key] = when {
+            finalRes == null -> Miss()
+            pending -> Partial(finalRes)
+            else -> finalRes
+        }
+        if (!pending) finalRes?.let { LyricsDisk.write(track.key, it); keepIfDownloaded(track, it) }
+        finalRes
     } } finally {
         earlyByKey.remove(track.key)
     }
 
-    /**
-     * The lyrics of the last [MAX_FILES] tracks, one file each in private storage, so a song heard
-     * before is not looked up again after a restart. Only line- or word-synced lyrics are kept (a
-     * plain text or a Free-cap preview may just be a fallback of the moment), for [MAX_AGE_MS].
-     * The oldest file by last use goes first. Every call copes with there being no app (unit tests).
-     */
     private object LyricsDisk {
         private const val MAX_FILES = 300
         private const val MAX_AGE_MS = 14 * 24 * 3_600_000L
         private val dir: java.io.File? by lazy {
             runCatching {
                 val files = com.music.spotui.di.Graph.app.filesDir
-                // lyrics_cache1 kept word timings moved by a wrong pairing (God's Plan off by 74 s): dropped once.
                 java.io.File(files, "lyrics_cache1").takeIf { it.exists() }?.deleteRecursively()
                 java.io.File(files, "lyrics_cache2").also { it.mkdirs() }
             }.getOrNull()
@@ -369,7 +357,7 @@ object LyricsApi {
             val o = JSONObject(f.readText())
             if (o.getString("key") != key) return null
             if (System.currentTimeMillis() - o.getLong("at") > MAX_AGE_MS) { f.delete(); return null }
-            f.setLastModified(System.currentTimeMillis()) // used just now: it stays
+            f.setLastModified(System.currentTimeMillis())
             decode(o)
         }.onFailure { Log.w("LyricsApi", "unreadable lyrics file: ${it.javaClass.simpleName}") }.getOrNull()
 
@@ -393,8 +381,16 @@ object LyricsApi {
         }
 
         fun encode(l: Lyrics) = JSONObject()
-            .put("synced", l.synced).put("language", l.language).put("provider", l.provider)
+            .put("synced", l.synced)
+            .put("language", l.language)
+            .put("provider", l.provider)
             .put("trl", l.translationLanguage)
+            .put("uploader", l.uploader)
+            .put("maker", l.maker)
+            .put("sourceUrl", l.sourceUrl)
+            .put("syncPrecision", l.syncPrecision.name)
+            .put("fetchedAtMs", l.fetchedAtMs)
+            .put("songwriters", l.songwriters?.let { JSONArray(it) })
             .put("colors", l.colors?.let { JSONArray(listOf(it.background, it.text, it.highlight)) })
             .put("lines", JSONArray().also { arr ->
                 l.lines.forEach { line ->
@@ -413,7 +409,6 @@ object LyricsApi {
 
         private fun wordsOf(wa: JSONArray?) = wa?.let { List(it.length()) { j -> it.getJSONArray(j).let { w -> LyricWord(w.getLong(0), w.getLong(1), w.getString(2)) } } }
 
-        // Entries written before translations, voices and backing vocals existed lack their keys: they read as none.
         fun decode(o: JSONObject): Lyrics {
             val colors = o.optJSONArray("colors")?.let { LyricsColors(it.getInt(0), it.getInt(1), it.getInt(2)) }
             val lines = o.getJSONArray("lines").let { arr ->
@@ -425,17 +420,38 @@ object LyricsApi {
                         backgroundWords = wordsOf(lo.optJSONArray("bw")))
                 }
             }
-            return Lyrics(lines, o.getBoolean("synced"), o.optString("language").takeIf { it.isNotEmpty() && it != "null" },
-                o.optString("provider").takeIf { it.isNotEmpty() && it != "null" }, colors,
-                translationLanguage = o.optString("trl").takeIf { it.isNotEmpty() && it != "null" })
+            val uploader = o.optString("uploader").takeIf { it.isNotEmpty() && it != "null" }
+            val maker = o.optString("maker").takeIf { it.isNotEmpty() && it != "null" }
+            val sourceUrl = o.optString("sourceUrl").takeIf { it.isNotEmpty() && it != "null" }
+            val songwriters = o.optJSONArray("songwriters")?.let { arr -> List(arr.length()) { j -> arr.getString(j) } }
+            val precName = o.optString("syncPrecision").takeIf { it.isNotEmpty() && it != "null" }
+            val prec = precName?.let { runCatching { SyncPrecision.valueOf(it) }.getOrNull() }
+                ?: if (lines.any { it.words != null }) SyncPrecision.SYLLABLE else if (o.getBoolean("synced")) SyncPrecision.LINE else SyncPrecision.STATIC
+            val fetchedAtMs = o.optLong("fetchedAtMs", System.currentTimeMillis())
+
+            if ("Spicy Lyrics" in (o.optString("provider") ?: "") && uploader != null) {
+                if (System.currentTimeMillis() - fetchedAtMs > 30L * 24 * 3600 * 1000) {
+                    return Lyrics(lines = emptyList(), synced = false)
+                }
+            }
+
+            return Lyrics(
+                lines = lines,
+                synced = o.getBoolean("synced"),
+                language = o.optString("language").takeIf { it.isNotEmpty() && it != "null" },
+                provider = o.optString("provider").takeIf { it.isNotEmpty() && it != "null" },
+                colors = colors,
+                translationLanguage = o.optString("trl").takeIf { it.isNotEmpty() && it != "null" },
+                uploader = uploader,
+                maker = maker,
+                sourceUrl = sourceUrl,
+                songwriters = songwriters,
+                syncPrecision = prec,
+                fetchedAtMs = fetchedAtMs,
+            )
         }
     }
 
-    /**
-     * The lyrics kept with a downloaded song (OfflineStore.lyricsFile), for as long as the song is:
-     * read when there is no connection or no source had any, and written again when found anew.
-     * Shown as a [Partial]: the song is looked up again a while later, when there may be a connection.
-     */
     private fun kept(track: Track): Lyrics? = runCatching {
         val f = com.music.spotui.data.offline.OfflineStore.lyricsFile(track.trackId)?.takeIf { it.isFile } ?: return null
         LyricsDisk.decode(JSONObject(f.readText()))
@@ -444,7 +460,6 @@ object LyricsApi {
         Log.d("LyricsApi", "${track.title}: ${it.lines.size} lines kept with the download")
     }
 
-    /** What can be kept with a download: lyrics with lines, not a Free account's cut-short preview. */
     internal fun keepable(lyrics: Lyrics): Boolean = !lyrics.isEmpty && lyrics.uncapped
 
     private fun keep(track: Track, lyrics: Lyrics) {
@@ -456,20 +471,14 @@ object LyricsApi {
         }.onFailure { Log.w("LyricsApi", "could not keep lyrics with the download: ${it.javaClass.simpleName}") }
     }
 
-    /** Lyrics found for a downloaded song replace the ones kept with it (the setting on). */
     private fun keepIfDownloaded(track: Track, lyrics: Lyrics) {
         if (!runCatching { com.music.spotui.data.preferences.LyricsOfflinePref.on &&
                 com.music.spotui.data.offline.OfflineStore.isDownloaded(track.trackId) }.getOrDefault(false)) return
         keep(track, lyrics)
     }
 
-    // Downloads ask for their lyrics one song at a time, behind what is shown: an extension answers one call at a time.
     private val keeping = kotlinx.coroutines.sync.Mutex()
 
-    /**
-     * A song was just downloaded ("Download lyrics with songs" on): its lyrics are looked up the usual
-     * way ([fetch], the lyrics extensions included) and kept with the download, for playing offline.
-     */
     fun keepForOffline(track: Track) {
         if (track.trackId.isBlank()) return
         scope.launch {
@@ -484,22 +493,11 @@ object LyricsApi {
     private fun online(): Boolean =
         runCatching { com.music.spotui.data.offline.OfflineStore.isOnline(com.music.spotui.di.Graph.app) }.getOrDefault(true)
 
-    /** Whether lyrics extensions are installed and running (false in unit tests: no app). */
     private fun extensionsAsked(): Boolean = runCatching { com.music.spotui.extensions.Extensions.hasLyrics() }.getOrDefault(false)
 
-    /**
-     * [block] (blocking requests) waited for [ms] at most: a request going on past it is left to end
-     * on its own, its answer unused. A time limit around the request itself never cut it (nothing
-     * in it suspends), so a slow source held the lines of the next ones for up to 20 s.
-     */
     private suspend fun <T> within(ms: Long, block: () -> T?): T? =
         kotlinx.coroutines.withTimeoutOrNull(ms) { scope.async { block() }.await() }
 
-    /**
-     * [to] with the backing vocals (and the singers) of the first of [asked] that has them, put on
-     * the same lines, when [to] has none: Spotify never times them apart, LyricsPlus and lrc.red
-     * (Apple Music's) do, and they are asked anyway.
-     */
     private suspend fun withBacks(to: Lyrics, vararg asked: kotlinx.coroutines.Deferred<Lyrics?>): Lyrics {
         if (LyricsExtras.hasBacks(to)) return to
         for (a in asked) {
@@ -509,15 +507,7 @@ object LyricsApi {
         return to
     }
 
-    /**
-     * "Word by word" (the setting): the sources with each word's time come first — Spotify's own
-     * when it has them, then LyricsPlus, lrc.red and Kugou, asked together; the line-synced
-     * chain after them. Spotify's colours are kept whoever gives the words.
-     */
     private suspend fun wordFirst(track: Track): Lyrics? = coroutineScope {
-        // The catalogues are asked with the full title: "Old Town Road - Remix" cut down to
-        // "Old Town Road" found the original (1:53), refused for its length (reported: lyrics
-        // not complete). The comparison still uses the title without its asides.
         val asked = track.title.trim()
         val title = cleanTitle(track.title)
         val artist = track.artist.substringBefore(",").trim()
@@ -527,7 +517,6 @@ object LyricsApi {
         val red = async { within(WORD_WAIT_MS) { asking("lrcred", track) { fromLrcRed(asked, title, artist, durationMs) } } }
         val kugou = async { within(WORD_WAIT_MS) { asking("kugou", track) { fromKugou(title, artist, durationMs) } } }
         val sp = spotify.await()
-        // Shown at once while the word timings or the backing vocals are looked for (reported: lyrics slow to come).
         if (sp != null) showEarly(track, sp)
         if (sp != null && sp.wordSynced && sp.uncapped) {
             kugou.cancel()
@@ -541,20 +530,9 @@ object LyricsApi {
         }
     }
 
-    /**
-     * Word timings come from another recording's catalogue (Apple Music, Kugou): its intro can be
-     * a little longer or shorter than Spotify's (reported: "mal synchro"). When Spotify times the
-     * same lines, the words are moved by the usual gap between the two (the median of the lines
-     * found in both, in order), so they follow Spotify's own audio.
-     *
-     * Only lines that appear once on each side are paired: a chorus sung five times paired its
-     * first copy with a later one (God's Plan was moved by 74 s on three such lines). The gaps
-     * must agree and stay within an intro's length; otherwise the words are not trusted (null)
-     * and Spotify's own lines are shown.
-     */
     private fun alignTo(words: Lyrics, spotify: Lyrics?): Lyrics? {
         if (spotify == null || !spotify.synced) return words
-        fun uniqueKeys(lines: List<com.music.spotui.data.entity.LyricLine>) =
+        fun uniqueKeys(lines: List<LyricLine>) =
             lines.map { matchKey(it.text) }.filter { it.length >= 6 }.groupingBy { it }.eachCount().filterValues { it == 1 }.keys
         val theirs = spotify.lines.filter { it.timeMs > 0 && matchKey(it.text).length >= 6 }
         val shared = uniqueKeys(theirs) intersect uniqueKeys(words.lines)
@@ -580,35 +558,272 @@ object LyricsApi {
         })
     }
 
-    /** How far a paired line may sit from the usual gap and still agree with it. */
     private const val ALIGN_TOLERANCE_MS = 1_500L
-
-    /** The most two recordings' intros are taken to differ by; more is another cut or a wrong pairing. */
     private const val MAX_ALIGN_SHIFT_MS = 20_000L
 
-    /** Nothing from Spotify: LRCLIB, then (opt-in) NetEase and Genius, then Kugou. */
     private suspend fun lineFallbacks(track: Track): Lyrics? = coroutineScope {
-            val title = cleanTitle(track.title)
-            val artist = track.artist.substringBefore(",").trim()
-            val durationSec = (track.durationMs / 1000).toInt()
-            val netease = if (extraSources) async { asking("netease", track) { fromNetEase(title, artist, durationSec) } } else null
-            val genius = if (extraSources) async { asking("genius", track) { fromGenius(title, artist) } } else null
-            val lrclib = asking("lrclib", track) {
-                val exact = async { lrclibGet(title, artist, track.album, durationSec) }
-                val fuzzy = async { lrclibSearch("$LRCLIB/search?track_name=${enc(title)}&artist_name=${enc(artist)}", title, artist, durationSec) }
-                exact.await() ?: fuzzy.await()
-                    ?: lrclibSearch("$LRCLIB/search?track_name=${enc(title)}", title, artist, durationSec)
-            }
-            val ne = netease?.await()
-            // Synced beats plain; NetEase's translation and romanization follow the lines of LRCLIB when it wins.
-            when {
-                lrclib != null && lrclib.synced -> LyricsExtras.carry(lrclib, ne)
-                ne != null && ne.synced -> ne
-                else -> asking("kugou", track) { fromKugou(title, artist, track.durationMs) } ?: lrclib ?: ne ?: genius?.await()
-            }
+        val title = cleanTitle(track.title)
+        val artist = track.artist.substringBefore(",").trim()
+        val durationSec = (track.durationMs / 1000).toInt()
+        val netease = if (extraSources) async { asking("netease", track) { fromNetEase(title, artist, durationSec) } } else null
+        val genius = if (extraSources) async { asking("genius", track) { fromGenius(title, artist) } } else null
+        val lrclib = asking("lrclib", track) {
+            val exact = async { lrclibGet(title, artist, track.album, durationSec) }
+            val fuzzy = async { lrclibSearch("$LRCLIB/search?track_name=${enc(title)}&artist_name=${enc(artist)}", title, artist, durationSec) }
+            exact.await() ?: fuzzy.await()
+                ?: lrclibSearch("$LRCLIB/search?track_name=${enc(title)}", title, artist, durationSec)
+        }
+        val ne = netease?.await()
+        when {
+            lrclib != null && lrclib.synced -> LyricsExtras.carry(lrclib, ne)
+            ne != null && ne.synced -> ne
+            else -> asking("kugou", track) { fromKugou(title, artist, track.durationMs) } ?: lrclib ?: ne ?: genius?.await()
+        }
     }
 
-    // ── 1. Spotify color-lyrics ──
+    // ── Spicy Lyrics ──
+    private fun fromSpicyLyrics(track: Track): Lyrics? {
+        val headers = HashMap<String, String>()
+        val pk = ApiSecrets.spicyLyricsPublishableKey
+        if (pk.isNotBlank()) headers["Authorization"] = "Bearer $pk"
+
+        val queryId = track.trackId.ifBlank { null }
+        val body = if (queryId != null) {
+            httpGet("https://api.spicylyrics.org/v1/lyrics/${enc(queryId)}", timeoutMs = 6000, provider = "spicy", headers = headers)
+        } else {
+            httpGet("https://api.spicylyrics.org/v1/lyrics/search?title=${enc(cleanTitle(track.title))}&artist=${enc(track.artist)}", timeoutMs = 6000, provider = "spicy", headers = headers)
+        } ?: return null
+
+        return parseSpicyLyricsJson(body)
+    }
+
+    internal fun parseSpicyLyricsJson(jsonStr: String): Lyrics? {
+        val root = runCatching { JSONObject(jsonStr) }.getOrNull() ?: return null
+        val o = root.optJSONObject("Body") ?: root
+        val typeStr = o.optString("Type").ifEmpty { o.optString("type") }
+        val sourceStr = o.optString("source").ifEmpty { "spicy_lyrics" }
+        val uploadAttr = o.optJSONObject("UploadAttribution")
+        val uploader = uploadAttr?.optString("uploader")?.ifBlank { null }
+        val maker = uploadAttr?.optString("maker")?.ifBlank { null }
+        val songwritersArr = o.optJSONArray("SongWriters")
+        val songwriters = songwritersArr?.let { List(it.length()) { i -> it.getString(i) } }
+        val contentArr = o.optJSONArray("Content") ?: o.optJSONArray("lines") ?: return null
+
+        val isSyllable = typeStr.equals("Syllable", ignoreCase = true)
+        val isLine = typeStr.equals("Line", ignoreCase = true)
+        val isStatic = typeStr.equals("Static", ignoreCase = true)
+
+        val lines = ArrayList<LyricLine>()
+        for (i in 0 until contentArr.length()) {
+            val item = contentArr.optJSONObject(i) ?: continue
+            val secStart = item.optDouble("StartTime", item.optDouble("Time", item.optDouble("start", 0.0)))
+            val timeMs = (secStart * 1000).toLong()
+
+            val text = item.optString("Text").ifEmpty { item.optString("text").ifEmpty { item.optString("Content") } }.trim()
+            val tr = item.optString("Translation").ifEmpty { item.optString("translation") }.ifBlank { null }
+            val ro = item.optString("Romanization").ifEmpty { item.optString("romanization") }.ifBlank { null }
+            val singer = item.optString("Singer").ifEmpty { item.optString("singer") }
+
+            val sylArr = item.optJSONArray("Syllables") ?: item.optJSONArray("Words")
+            var words: List<LyricWord>? = null
+            var bgWords: List<LyricWord>? = null
+            var bgText: String? = null
+
+            if (sylArr != null && sylArr.length() > 0) {
+                val mainW = ArrayList<LyricWord>()
+                val bgW = ArrayList<LyricWord>()
+                for (j in 0 until sylArr.length()) {
+                    val sObj = sylArr.optJSONObject(j) ?: continue
+                    val sStart = (sObj.optDouble("StartTime", sObj.optDouble("time", 0.0)) * 1000).toLong()
+                    val sEnd = (sObj.optDouble("EndTime", sObj.optDouble("end", 0.0)) * 1000).toLong()
+                    val sText = sObj.optString("Text").ifEmpty { sObj.optString("text") }
+                    val isBg = sObj.optBoolean("isBackground", false)
+                    val lw = LyricWord(sStart, sEnd, sText)
+                    if (isBg) bgW.add(lw) else mainW.add(lw)
+                }
+                if (mainW.isNotEmpty()) words = mainW
+                if (bgW.isNotEmpty()) {
+                    bgWords = bgW
+                    bgText = bgW.joinToString("") { it.text }.trim().removeSurrounding("(", ")")
+                }
+            }
+
+            if (text.isNotEmpty() || words != null) {
+                val lineText = text.ifEmpty { words?.joinToString("") { it.text }?.trim() ?: "" }
+                lines.add(
+                    LyricLine(
+                        timeMs = if (isStatic) 0L else timeMs,
+                        text = lineText,
+                        words = words,
+                        translation = tr,
+                        romanization = ro,
+                        voice = voiceOf(singer),
+                        background = bgText,
+                        backgroundWords = bgWords,
+                    )
+                )
+            }
+        }
+
+        if (lines.isEmpty()) return null
+
+        val syncPrecision = when {
+            isSyllable || lines.any { it.words != null } -> SyncPrecision.SYLLABLE
+            isLine || lines.any { it.timeMs > 0 } -> SyncPrecision.LINE
+            else -> SyncPrecision.STATIC
+        }
+
+        val providerName = if (sourceStr.contains("spicy", ignoreCase = true)) "Spicy Lyrics" else "Spicy Lyrics · $sourceStr"
+        val sourceUrl = "https://spicylyrics.org"
+
+        return Lyrics(
+            lines = lines,
+            synced = syncPrecision != SyncPrecision.STATIC,
+            provider = providerName,
+            uploader = uploader,
+            maker = maker,
+            sourceUrl = sourceUrl,
+            songwriters = songwriters,
+            syncPrecision = syncPrecision,
+        )
+    }
+
+    // ── AMLL TTML Database ──
+    private fun fromAmll(track: Track): Lyrics? {
+        val title = cleanTitle(track.title)
+        val artist = track.artist.substringBefore(",").trim()
+        val searchUrl = "https://api.amll.dev/v1/lyrics/search?q=${enc("$title $artist")}"
+        val searchBody = httpGet(searchUrl, timeoutMs = 6000, provider = "amll") ?: return null
+        val root = runCatching { JSONObject(searchBody) }.getOrNull() ?: return null
+        val items = root.optJSONArray("data") ?: root.optJSONArray("results") ?: return null
+        var matchedTtml: String? = null
+        for (i in 0 until items.length()) {
+            val item = items.optJSONObject(i) ?: continue
+            val candTitle = item.optString("title").ifEmpty { item.optString("trackName") }
+            val candArtist = item.optString("artist").ifEmpty { item.optString("artistName") }
+            val durSec = item.optInt("duration", 0)
+            if (isPlausibleMatch(candTitle, candArtist, durSec, title, artist, (track.durationMs / 1000).toInt())) {
+                matchedTtml = item.optString("ttml").takeIf { it.isNotBlank() }
+                if (matchedTtml == null) {
+                    val id = item.optString("id")
+                    if (id.isNotBlank()) {
+                        matchedTtml = httpGet("https://api.amll.dev/v1/lyrics/get?id=${enc(id)}", timeoutMs = 6000, provider = "amll")
+                    }
+                }
+                if (!matchedTtml.isNullOrBlank()) break
+            }
+        }
+        if (matchedTtml.isNullOrBlank()) return null
+        return parseTtml(matchedTtml)?.copy(provider = "AMLL (TTML)")
+    }
+
+    // ── Unison (TTML or LRC) ──
+    private fun fromUnison(track: Track, requiredFormat: String? = null): Lyrics? {
+        val title = cleanTitle(track.title)
+        val artist = track.artist.substringBefore(",").trim()
+        val url = "https://unison.boidu.dev/lyrics?song=${enc(title)}&artist=${enc(artist)}&al=${enc(track.album)}&d=${track.durationMs / 1000}"
+        val body = httpGet(url, timeoutMs = 6000, provider = "unison") ?: return null
+        val o = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        if (o.optBoolean("success") == false) return null
+        val data = o.optJSONObject("data") ?: return null
+        val format = data.optString("format").lowercase()
+        if (requiredFormat != null && format != requiredFormat.lowercase()) return null
+        val lyricsContent = data.optString("lyrics").takeIf { it.isNotBlank() } ?: return null
+
+        return when (format) {
+            "ttml" -> parseTtml(lyricsContent)?.copy(provider = "Unison (TTML)")
+            "lrc" -> {
+                val lines = parseLrc(lyricsContent)
+                if (lines.isNotEmpty()) Lyrics(lines, synced = true, provider = "Unison (LRC)") else null
+            }
+            else -> {
+                val lines = lyricsContent.lines().map { LyricLine(0L, it.trim()) }.filter { it.text.isNotEmpty() }
+                if (lines.isNotEmpty()) Lyrics(lines, synced = false, provider = "Unison (Plain)") else null
+            }
+        }
+    }
+
+    // ── Better Lyrics (QQ QRC XML) ──
+    private fun fromBetterLyricsQQ(track: Track): Lyrics? {
+        val title = cleanTitle(track.title)
+        val artist = track.artist.substringBefore(",").trim()
+        val url = "https://api.betterlyrics.org/qq/getLyrics?s=${enc(title)}&a=${enc(artist)}&al=${enc(track.album)}&d=${track.durationMs / 1000}"
+        val body = httpGet(url, timeoutMs = 6000, provider = "qq") ?: return null
+        val o = runCatching { JSONObject(body) }.getOrNull()
+        val qrcContent = o?.optString("qrc").takeIf { !it.isNullOrBlank() }
+            ?: o?.optString("lyrics").takeIf { !it.isNullOrBlank() }
+            ?: body
+        return parseQrc(qrcContent)
+    }
+
+    private val qrcLinePattern = Regex("""^\[(\d+),(\d+)\](.*)$""")
+    private val qrcWordPattern = Regex("""<(\d+),(\d+),\d+>([^<]*)""")
+
+    internal fun parseQrc(qrc: String): Lyrics? {
+        val lines = ArrayList<LyricLine>()
+        for (raw in qrc.lines()) {
+            val trimmed = raw.trim()
+            val m = qrcLinePattern.find(trimmed)
+            if (m != null) {
+                val lineStartMs = m.groupValues[1].toLong()
+                val content = m.groupValues[3]
+                val wordMatches = qrcWordPattern.findAll(content).toList()
+                if (wordMatches.isNotEmpty()) {
+                    val words = wordMatches.map { w ->
+                        val wStart = lineStartMs + w.groupValues[1].toLong()
+                        val wDur = w.groupValues[2].toLong()
+                        LyricWord(wStart, wStart + wDur, w.groupValues[3])
+                    }
+                    val lineText = words.joinToString("") { it.text }.trim()
+                    if (lineText.isNotEmpty()) {
+                        lines.add(LyricLine(lineStartMs, lineText, words))
+                    }
+                } else {
+                    val lineText = content.replace(Regex("""<[^>]*>"""), "").trim()
+                    if (lineText.isNotEmpty()) {
+                        lines.add(LyricLine(lineStartMs, lineText))
+                    }
+                }
+            } else if (trimmed.startsWith("[")) {
+                val lrcLines = parseLrc(trimmed)
+                lines.addAll(lrcLines)
+            }
+        }
+        if (lines.isEmpty()) return null
+        return Lyrics(lines = lines.sortedBy { it.timeMs }, synced = true, provider = "QQ Music · QRC", syncPrecision = if (lines.any { it.words != null }) SyncPrecision.SYLLABLE else SyncPrecision.LINE)
+    }
+
+    // ── LRCMux ──
+    private fun fromLrcMux(track: Track): Lyrics? {
+        val title = cleanTitle(track.title)
+        val artist = track.artist.substringBefore(",").trim()
+        val url = "https://api.lrcmux.dev/v1/lyrics?title=${enc(title)}&artist=${enc(artist)}&duration=${track.durationMs / 1000}"
+        val body = httpGet(url, timeoutMs = 6000, provider = "lrcmux") ?: return null
+        val o = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        val synced = o.optBoolean("synced", false) || o.optString("syncedLyrics").isNotBlank()
+        val lrcText = o.optString("syncedLyrics").ifEmpty { o.optString("lyrics") }
+        if (lrcText.isBlank()) return null
+        val lines = parseLrc(lrcText)
+        if (lines.isEmpty()) return null
+        return Lyrics(lines = lines, synced = synced, provider = "LRCMux")
+    }
+
+    // ── Lyrics.ovh ──
+    private fun fromLyricsOvh(track: Track): Lyrics? {
+        val title = cleanTitle(track.title)
+        val artist = track.artist.substringBefore(",").trim()
+        if (title.isBlank() || artist.isBlank()) return null
+        val url = "https://api.lyrics.ovh/v1/${enc(artist)}/${enc(title)}"
+        val body = httpGet(url, timeoutMs = 6000, provider = "lyricsovh") ?: return null
+        val o = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        val text = o.optString("lyrics").trim()
+        if (text.isBlank()) return null
+        val lines = text.lines().map { LyricLine(0L, it.trim()) }.filter { it.text.isNotEmpty() }
+        if (lines.isEmpty()) return null
+        return Lyrics(lines = lines, synced = false, provider = "Lyrics.ovh")
+    }
+
+    // ── Spotify color-lyrics ──
     private suspend fun fromSpotify(track: Track): Lyrics? {
         if (track.trackId.isBlank()) return null
         val sp = runCatching { app.myspoti.host.android.MyspotiRuntime.api.extras.lyrics("spotify:track:${track.trackId}") }
@@ -627,7 +842,7 @@ object LyricsApi {
         )
     }
 
-    // ── 4. NetEase Cloud Music (line-synced LRC) ──
+    // ── NetEase Cloud Music ──
     private fun fromNetEase(title: String, artist: String, durationSec: Int): Lyrics? {
         val search = httpGet("https://music.163.com/api/search/get?s=${enc("$title $artist")}&type=1&limit=6", timeoutMs = 6000, provider = "netease")
             ?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
@@ -636,11 +851,9 @@ object LyricsApi {
             val song = songs.optJSONObject(i) ?: continue
             val songArtist = song.optJSONArray("artists")?.optJSONObject(0)?.optString("name").orEmpty()
             if (!isPlausibleMatch(song.optString("name"), songArtist, (song.optLong("duration") / 1000).toInt(), title, artist, durationSec)) continue
-            // tlyric: a translation (in Chinese), romalrc: the romanization, both timed like the lyrics (rv=-1 asks for the latter).
             val o = httpGet("https://music.163.com/api/song/lyric?id=${song.optLong("id")}&lv=1&kv=1&tv=-1&rv=-1", timeoutMs = 6000, provider = "netease")
                 ?.let { runCatching { JSONObject(it) }.getOrNull() } ?: continue
             val lrc = o.optJSONObject("lrc")?.optString("lyric").orEmpty()
-            // Credit lines ("作词 : …") come first in NetEase LRC.
             val plain = parseLrc(lrc).filter { it.text.isNotBlank() && !it.text.contains(" : ") }
             if (plain.isEmpty()) continue
             val lines = LyricsExtras.attach(plain,
@@ -652,9 +865,8 @@ object LyricsApi {
         return null
     }
 
-    // ── 5. Genius (plain text from the song page) ──
+    // ── Genius ──
     private fun fromGenius(title: String, artist: String): Lyrics? {
-        // Translation and romanization pages take some of the first hits.
         val search = httpGet("https://genius.com/api/search/song?per_page=10&q=${enc("$title $artist")}", timeoutMs = 6000, provider = "genius")
             ?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
         val hits = search.optJSONObject("response")?.optJSONArray("sections")?.optJSONObject(0)?.optJSONArray("hits") ?: return null
@@ -671,12 +883,6 @@ object LyricsApi {
         return null
     }
 
-    /**
-     * A Genius hit is the song: one of its artists is ours and its title is ours, either without
-     * what Genius adds in brackets ("Kendrick Lamar (Ft. Rihanna)", "IU (아이유)", a romanized title
-     * "夜に駆ける (Yoru Ni Kakeru)") or co-artists ("Stromae & Pomme"). The titles must still be the
-     * same ("Hello Again" is not "Hello"): Genius gives no length to tell two songs apart.
-     */
     internal fun geniusMatch(candTitle: String, artistNames: String, primaryArtist: String, title: String, artist: String): Boolean {
         val names = artistNames.replace(geniusAside, "")
         val artists = names.split(',', '&', '/') + names + primaryArtist.replace(geniusAside, "")
@@ -687,15 +893,11 @@ object LyricsApi {
 
     private val geniusAside = Regex("""\s*\([^)]*\)""")
     private val lastAside = Regex("""\s*\([^)]*\)\s*$""")
-
     private val geniusContainer = Regex("<div[^>]*data-lyrics-container=\"true\"[^>]*>", RegexOption.IGNORE_CASE)
-    // Above the lyrics, in the first container: the contributors, the translations and the song's description.
     private val geniusHeader = Regex("<div[^>]*data-exclude-from-selection=\"true\"[^>]*>", RegexOption.IGNORE_CASE)
-    // Built once: tidy() runs on every line of a parsed song and every word of a word-synced one.
     private val spaces = Regex("\\s+")
     private val htmlBreak = Regex("<br\\s*/?>", RegexOption.IGNORE_CASE)
 
-    /** Where the div whose content starts at [from] closes (nested divs balanced), or -1. */
     private fun divEnd(html: String, from: Int): Int {
         var depth = 1
         var i = from
@@ -709,7 +911,6 @@ object LyricsApi {
         return -1
     }
 
-    /** [part] without Genius's header blocks (see [geniusHeader]). */
     internal fun withoutGeniusHeader(part: String): String {
         var out = part
         while (true) {
@@ -720,7 +921,6 @@ object LyricsApi {
         }
     }
 
-    /** The lyrics containers of a Genius song page, as plain text (nested divs balanced). */
     internal fun geniusText(html: String): String? {
         val parts = geniusContainer.findAll(html).mapNotNull { m ->
             val start = m.range.last + 1
@@ -733,7 +933,7 @@ object LyricsApi {
         }.trim().takeIf { it.isNotEmpty() }
     }
 
-    // ── 2. LRCLIB ──
+    // ── LRCLIB ──
     private fun lrclibGet(title: String, artist: String, album: String, durationSec: Int): Lyrics? {
         val url = buildString {
             append("$LRCLIB/get?track_name=").append(enc(title))
@@ -748,7 +948,6 @@ object LyricsApi {
 
     private fun lrclibSearch(url: String, title: String, artist: String, durationSec: Int): Lyrics? {
         val arr = httpGet(url, provider = "lrclib")?.let { runCatching { JSONArray(it) }.getOrNull() } ?: return null
-        // Of the plausible candidates, prefer synced lyrics, then the closest duration.
         var best: JSONObject? = null
         var bestScore = Long.MAX_VALUE
         for (i in 0 until arr.length()) {
@@ -773,7 +972,7 @@ object LyricsApi {
         return Lyrics(plain.split("\n").map { LyricLine(0L, it) }, synced = false, provider = "LRCLIB")
     }
 
-    // ── Word by word: LyricsPlus (Apple Music's timing, by title / artist / length) ──
+    // ── LyricsPlus ──
     private val LYRICS_PLUS = listOf("https://lyricsplus.binimum.org", "https://lyricsplus.prjktla.my.id")
 
     private fun fromLyricsPlus(asked: String, title: String, artist: String, durationMs: Long): Lyrics? {
@@ -788,11 +987,6 @@ object LyricsApi {
         return null
     }
 
-    /**
-     * LyricsPlus's answer as lyrics. A line's backing vocals (`isBackground` syllables) are kept
-     * apart from its words, `element.singer` ("v1", "v2") says who sings, and `translation` /
-     * `transliteration` (a text, or an object with a `text`) are taken when a line has them.
-     */
     internal fun lyricsPlusLines(o: JSONObject): Lyrics? {
         val meta = o.optJSONObject("metadata")
         val arr = o.optJSONArray("lyrics") ?: return null
@@ -805,7 +999,6 @@ object LyricsApi {
             fun word(w: JSONObject): LyricWord { val t = w.optLong("time"); return LyricWord(t, t + w.optLong("duration"), w.optString("text")) }
             var words = all.filterNot { it.optBoolean("isBackground") }.map(::word).takeIf { it.isNotEmpty() }
             var back = all.filter { it.optBoolean("isBackground") }.map(::word).takeIf { it.isNotEmpty() }
-            // A line of backing vocals only is a line of its own.
             if (words == null && back != null) { words = back; back = null }
             val text = words?.joinToString("") { it.text }?.trim() ?: l.optString("text").trim()
             if (text.isEmpty()) continue
@@ -824,18 +1017,15 @@ object LyricsApi {
             translationLanguage = translationLanguage.takeIf { lines.any { it.translation != null } })
     }
 
-    /** A string, or the `text` of an object: what a source gives as a translation or a romanization. */
     private fun textOf(v: Any?): String? =
         when (v) { is String -> v; is JSONObject -> v.optString("text"); else -> null }?.trim()?.ifEmpty { null }
 
-    /** "v1" → 1, "v2" → 2; Apple's "v1000" (everyone) → 0; anything else is unknown. */
     internal fun voiceOf(agent: String?): Int? =
         agent?.trim()?.removePrefix("v")?.toIntOrNull()?.takeIf { it >= 0 }?.let { if (it >= 1000) 0 else it }
 
-    /** Backing vocals as plain text: "(Woo-hoo)" → "Woo-hoo". */
     private fun backingText(s: String): String? = s.replace(spaces, " ").trim().removeSurrounding("(", ")").trim().ifEmpty { null }
 
-    // ── Word by word: lrc.red (Apple Music TTML, found by ISRC) ──
+    // ── lrc.red ──
     private fun fromLrcRed(asked: String, title: String, artist: String, durationMs: Long): Lyrics? {
         val search = httpGet("https://lrc.red/search.json?q=${enc("$asked $artist")}", timeoutMs = 5000, provider = "lrcred") ?: return null
         val hits = runCatching { JSONObject(search).optJSONArray("hits") }.getOrNull() ?: return null
@@ -844,16 +1034,9 @@ object LyricsApi {
         } ?: return null
         val isrc = hit.optString("isrc").takeIf { it.isNotBlank() } ?: return null
         val ttml = httpGet("https://lrc.red/s/${enc(isrc)}.ttml", timeoutMs = 6000, provider = "lrcred") ?: return null
-        return parseTtml(ttml)?.copy(provider = "Apple Music · lrc.red")
+        return parseTtml(ttml)?.copy(provider = "Apple Music · lrc.red", sourceUrl = "https://lrc.red")
     }
 
-    /**
-     * Apple Music's TTML: a <p> per line (its `ttm:agent` says who sings), a timed <span> per word,
-     * backing vocals in a `ttm:role="x-bg"` span (kept apart from the line), and a translation and a
-     * romanization either in the head (`translation` / `transliteration`, a `text for="L1"` per line,
-     * the line's `*:key`) or inside the line (`x-translation` / `x-roman` spans). [newParser]: a pull
-     * parser without namespace processing (tests bring their own).
-     */
     internal fun parseTtml(xml: String, newParser: () -> org.xmlpull.v1.XmlPullParser = { android.util.Xml.newPullParser() }): Lyrics? = runCatching {
         val p = newParser()
         p.setFeature(org.xmlpull.v1.XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
@@ -861,12 +1044,10 @@ object LyricsApi {
         fun attr(name: String) = p.getAttributeValue(null, name)
         fun lineKey() = (0 until p.attributeCount).firstOrNull { p.getAttributeName(it).let { n -> n == "key" || n.endsWith(":key") } }?.let { p.getAttributeValue(it) }
         fun tidy(sb: CharSequence) = sb.toString().replace(spaces, " ").trim()
-        // Head: only the first translation and the first transliteration, text by line key.
         val headTranslation = HashMap<String, String>(); val headRoman = HashMap<String, String>()
         var translationLanguage: String? = null
         var headKind = 0; var headSeenTr = false; var headSeenRo = false
         var headKey: String? = null; var headText = StringBuilder(); var headSkip = 0
-        // Body
         val lines = ArrayList<LyricLine>()
         var lineStart = -1L
         var words: MutableList<LyricWord>? = null
@@ -913,7 +1094,6 @@ object LyricsApi {
                     else if (words != null) when (role) {
                         null -> {
                             if (wordStart >= 0) word.append(t)
-                            // Text between two words (a space): it belongs to the word before it.
                             else if (words!!.isNotEmpty()) words!![words!!.lastIndex] = words!![words!!.lastIndex].let { it.copy(text = it.text + t) }
                             plain.append(t)
                         }
@@ -940,7 +1120,6 @@ object LyricsApi {
                         if (role == "x-bg" && roleDepth == 2 && p.name == "span" && bgStart >= 0) { bgWords.add(LyricWord(bgStart, bgEnd, bgWord.toString())); bgStart = -1 }
                         roleDepth--
                         if (roleDepth == 0) {
-                            // One span of backing vocals with no span of words inside: it is the one word.
                             if (role == "x-bg" && bgWords.isEmpty() && bgSpan[0] >= 0 && bgPlain.isNotBlank()) bgWords.add(LyricWord(bgSpan[0], bgSpan[1], bgPlain.toString()))
                             role = null
                         }
@@ -951,7 +1130,6 @@ object LyricsApi {
                         var foreground: List<LyricWord>? = words!!.takeIf { it.isNotEmpty() }
                         var back: List<LyricWord>? = bgWords.takeIf { it.isNotEmpty() }
                         var backText = backingText(tidy(bgPlain))
-                        // A line of backing vocals only is a line of its own.
                         if (text.isEmpty() && backText != null) { text = backText; foreground = back; back = null; backText = null }
                         if (text.isNotEmpty() && lineStart >= 0) {
                             val tr = tidy(inTr).ifEmpty { null } ?: key?.let(headTranslation::get)
@@ -967,10 +1145,9 @@ object LyricsApi {
             }
         }
         if (lines.isEmpty()) null
-        else Lyrics(lines, synced = true, translationLanguage = translationLanguage.takeIf { lines.any { it.translation != null } })
+        else Lyrics(lines, synced = true, translationLanguage = translationLanguage.takeIf { lines.any { it.translation != null } }, syncPrecision = SyncPrecision.SYLLABLE)
     }.getOrNull()
 
-    /** TTML times: "11.859", "1:02.345" or "00:01:02.345" → ms. */
     private fun clock(v: String?): Long {
         if (v.isNullOrBlank()) return -1
         val parts = v.trim().removeSuffix("s").split(':')
@@ -980,7 +1157,7 @@ object LyricsApi {
     }
     private fun parseClock(v: String?): Long = clock(v).coerceAtLeast(0)
 
-    // ── Word by word: Kugou (its own catalogue, strong in Asian music; KRC, encrypted) ──
+    // ── Kugou ──
     private val KRC_KEY = intArrayOf(64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105)
     private val krcLine = Regex("""^\[(\d+),(\d+)](.*)$""")
     private val krcWord = Regex("""<(\d+),(\d+),\d+>([^<]*)""")
@@ -1006,17 +1183,12 @@ object LyricsApi {
                 val s = start + w.groupValues[1].toLong(); LyricWord(s, s + w.groupValues[2].toLong(), w.groupValues[3])
             }.toList()
             val text = words.joinToString("") { it.text }.trim()
-            // Kugou opens with credit lines ("作词：…"): not lyrics.
             if (text.isEmpty() || text.contains('：')) null else LyricLine(start, text, words.takeIf { it.isNotEmpty() })
         }
         if (lines.size < 3) return null
-        return Lyrics(lines, synced = true, provider = "Kugou")
+        return Lyrics(lines, synced = true, provider = "Kugou", syncPrecision = SyncPrecision.SYLLABLE)
     }
 
-    /**
-     * The same song for the word-timed sources: one of its artists is ours, the title is ours
-     * (asides left out, either may be longer), and the length is within 4 s when both are known.
-     */
     internal fun sameSong(candTitle: String, candArtist: String, candDurationMs: Long, title: String, artist: String, durationMs: Long): Boolean {
         if (matchKey(artist).isEmpty() || (candArtist.split(',', '&', '、', '/') + candArtist).none { LyricsMatch.sameArtist(it, artist) }) return false
         val t = matchKey(title); val ct = matchKey(cleanTitle(candTitle))
@@ -1024,25 +1196,15 @@ object LyricsApi {
         return durationMs <= 0 || candDurationMs <= 0 || kotlin.math.abs(candDurationMs - durationMs) <= 4_000
     }
 
-    // ── Matching ──
-    // Strip the noise Spotify puts in titles that other catalogues don't have:
-    // "Song - 2011 Remaster", "Song (feat. X)", "Song [Bonus Track]".
     private val featTag = Regex("""\s*[(\[][^)\]]*(feat\.?|ft\.?|with )[^)\]]*[)\]]""", RegexOption.IGNORE_CASE)
     private val bracketTag = Regex("""\s*[(\[][^)\]]*(remaster|remastered|live|version|edit|mono|stereo|deluxe|bonus)[^)\]]*[)\]]""", RegexOption.IGNORE_CASE)
     private fun cleanTitle(title: String) =
         title.substringBefore(" - ").replace(featTag, "").replace(bracketTag, "").trim()
 
-    // Letters and digits only, accents and case folded away ("Rosalía" is "rosalia").
     internal fun matchKey(s: String) = LyricsMatch.key(s)
-    // Exact normalized identity is conservative: ambiguous fallbacks are rejected.
     private fun overlaps(a: String, b: String) = a.isNotEmpty() && a == b
 
-    /**
-     * Fallback hits are only used when they are the same song: same artist (accents and the
-     * order of its words aside), same title (either may carry extras), and a similar length
-     * when both are known.
-     */
-    internal fun isPlausibleMatch(
+    fun isPlausibleMatch(
         candTitle: String, candArtist: String, candDurationSec: Int,
         title: String, artist: String, durationSec: Int,
     ): Boolean {
@@ -1051,9 +1213,8 @@ object LyricsApi {
         return durationSec <= 0 || candDurationSec <= 0 || kotlin.math.abs(candDurationSec - durationSec) <= 3
     }
 
-    // LRC: each line is "[mm:ss.xx] text" (a line may carry multiple timestamps).
     private val lrcTag = Regex("""\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?]""")
-    private fun parseLrc(lrc: String): List<LyricLine> {
+    fun parseLrc(lrc: String): List<LyricLine> {
         val out = ArrayList<LyricLine>()
         for (raw in lrc.split("\n")) {
             val tags = lrcTag.findAll(raw).toList()
@@ -1070,19 +1231,18 @@ object LyricsApi {
                 out.add(LyricLine(m.groupValues[1].toLong() * 60_000 + m.groupValues[2].toLong() * 1_000 + ms, text))
             }
         }
-        // Collapse runs of empty (instrumental) lines into one ♪.
         val sorted = out.sortedBy { it.timeMs }
         return sorted.filterIndexed { i, l -> !(l.text == "♪" && i > 0 && sorted[i - 1].text == "♪") }
     }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
-    /**
-     * A GET, its body on a 200, else null. [provider] (the health id, see [LyricsHealth]): a 5xx, a
-     * 429 or an exception counts against it, any other answer (a 404 too) is an answer; a provider
-     * set aside is not asked at all, unless asked for by hand ([fetchFrom]).
-     */
-    private fun httpGet(spec: String, timeoutMs: Int = 5000, provider: String? = null): String? {
+    private fun httpGet(
+        spec: String,
+        timeoutMs: Int = 5000,
+        provider: String? = null,
+        headers: Map<String, String> = emptyMap(),
+    ): String? {
         if (provider != null && bypass.get() != true) health.reason(provider)?.let {
             Log.d("LyricsApi", "$provider set aside ($it)")
             health.skipped()
@@ -1096,6 +1256,7 @@ object LyricsApi {
                 readTimeout = timeoutMs
                 setRequestProperty("User-Agent", UA)
                 setRequestProperty("Accept", "application/json, text/html;q=0.9, */*;q=0.8")
+                headers.forEach { (k, v) -> setRequestProperty(k, v) }
             }
             try {
                 val code = conn.responseCode
@@ -1119,10 +1280,6 @@ object LyricsApi {
         }
     }
 
-    /**
-     * [provider]'s answer for [track]: not asked again for [LyricsHealth.MISSING_MS] after it had
-     * no lyrics (a failed or skipped request is not "no lyrics": it is asked again).
-     */
     private inline fun asking(provider: String, track: Track, block: () -> Lyrics?): Lyrics? {
         if (health.isMissing(track.key, provider)) return null
         val lostBefore = health.lostCount()

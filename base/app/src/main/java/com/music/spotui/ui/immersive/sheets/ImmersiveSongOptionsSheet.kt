@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.OndemandVideo
 import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lightbulb
@@ -263,6 +264,28 @@ fun ImmersiveSongOptionsSheet(
             }
             if (!com.music.spotui.data.preferences.PlayerCapsulePref.shown) {
                 ImmersiveSheetRow(Icons.Rounded.Devices, stringResource(R.string.listen_on)) { showDevices = true }
+            }
+
+            val keepScreenOn by com.music.spotui.data.preferences.ImmersiveSettingsPref.keepScreenOn.collectAsState()
+            ImmersiveSheetRow(
+                icon = Icons.Rounded.Tv,
+                label = "Keep Screen On",
+                leading = if (keepScreenOn) ({ LikedTick() }) else null,
+            ) {
+                com.music.spotui.data.preferences.ImmersiveSettingsPref.setKeepScreenOn(context, !keepScreenOn)
+                toast(if (!keepScreenOn) "Keep Screen On enabled" else "Keep Screen On disabled")
+                onDismiss()
+            }
+
+            val canvasEnabled by com.music.spotui.data.preferences.ImmersiveSettingsPref.canvasEnabled.collectAsState()
+            ImmersiveSheetRow(
+                icon = Icons.Rounded.OndemandVideo,
+                label = "Canvas Video",
+                leading = if (canvasEnabled) ({ LikedTick() }) else null,
+            ) {
+                com.music.spotui.data.preferences.ImmersiveSettingsPref.setCanvasEnabled(context, !canvasEnabled)
+                toast(if (!canvasEnabled) "Canvas enabled" else "Canvas disabled")
+                onDismiss()
             }
 
         }

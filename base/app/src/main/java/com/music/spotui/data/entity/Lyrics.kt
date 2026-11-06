@@ -1,5 +1,12 @@
 package com.music.spotui.data.entity
 
+/** Level of synchronization precision provided by the source. */
+enum class SyncPrecision {
+    SYLLABLE,
+    LINE,
+    STATIC,
+}
+
 /** One word (or syllable) of word-synced lyrics; [endMs] 0 = until the next word. */
 data class LyricWord(
     val startMs: Long,
@@ -50,9 +57,15 @@ data class Lyrics(
     val uncapped: Boolean = true,
     /** The language of the lines' [LyricLine.translation] (as the source says it: "en", "zh"), null when unknown. */
     val translationLanguage: String? = null,
+    val uploader: String? = null,
+    val maker: String? = null,
+    val sourceUrl: String? = null,
+    val songwriters: List<String>? = null,
+    val syncPrecision: SyncPrecision = if (lines.any { it.words != null }) SyncPrecision.SYLLABLE else if (synced) SyncPrecision.LINE else SyncPrecision.STATIC,
+    val fetchedAtMs: Long = System.currentTimeMillis(),
 ) {
     val isEmpty: Boolean get() = lines.isEmpty()
-    val wordSynced: Boolean get() = lines.any { it.words != null }
+    val wordSynced: Boolean get() = lines.any { it.words != null } || syncPrecision == SyncPrecision.SYLLABLE
 
     /** Some lines carry a romanization from the source. */
     val hasRomanization: Boolean get() = lines.any { !it.romanization.isNullOrBlank() }
